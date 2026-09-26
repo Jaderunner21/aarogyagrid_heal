@@ -1,0 +1,143 @@
+import { describe, expect, it } from "vitest"
+import { planNearExpiry, planRedistribution, type PairFact, type PlanFacility } from "./redistribute"
+import { stockAlerts } from "./alerts"
+
+const settings = { targetCoverDays: 30, donorKeepDays: 45, maxDistanceKm: 80, minTransferQty: 10 }
+const base = { type: "phc" as const, districtId: "D1", resupplyDays: 7, supplyingWarehouse: "W1" }
+const facilities: PlanFacility[] = [
+  { id: "W1", name: "Warehouse", type: "warehouse", districtId: "D1", lat: 24.58, lng: 73.71, resupplyDays: 3, supplyingWarehouse: null },
+  { id: "A", name: "PHC A", ...base, lat: 24.6, lng: 73.7 },
+  { id: "B", name: "PHC B", ...base, lat: 24.65, lng: 73.75 }, // ~8 km from A
+  { id: "C", name: "PHC C", ...base, lat: 24.9, lng: 74.0 },
+  { id: "X", name: "PHC X", ...base, districtId: "D2", supplyingWarehouse: "W2", lat: 24.62, lng: 73.72 },
+]
+const pair = (facilityId: string, stock: number, pdu: number | null, daysLeft: number | null): PairFact => ({
+  facilityId,
+  medicineId: "M",
+  stock,
+  pdu,
+  daysLeft,
+})
+const plan = (pairs: PairFact[], receivers: string[], crossDistrict = false) =>
+  planRedistribution({
+    facilities,
+    pairs,
+    receivers: pairs.filter((p) => receivers.includes(p.facilityId)).map((p) => ({ ...p, alertId: `alert-${p.facilityId}` })),
+    incoming: new Map(),
+    outgoing: new Map(),
+    settings,
+    crossDistrict,
+  })
+
+describe("planRedistribution", () => {
+  it("uses the warehouse when there is time and stock", () => {
+    const out = plan([pair("A", 100, 10, 10), pair("W1", 5000, 20, 250)], ["A"])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ kind: "indent", facilityId: "A", warehouseId: "W1", qty: 200 })
+  })
+
+  it("sends an urgent case to the nearest PHC donor and never over-commits it", () => {
+    // A and C both out of stock; B can spare 1000 − 10×45 = 550.
+    const out = plan([pair("A", 0, 10, 0), pair("C", 0, 20, 0), pair("B", 1000, 10, 100), pair("W1", 0, 1, 0)], ["A", "C"])
+    const transfers = out.filter((p) => p.kind === "transfer")
+    const fromB = transfers.filter((t) => t.kind === "transfer" && t.fromId === "B").reduce((s, t) => s + t.qty, 0)
+    expect(transfers[0]).toMatchObject({ kind: "transfer", fromId: "B", priority: 1, isCrossDistrict: false })
+    expect(fromB).toBeLessThanOrEqual(550)
+  })
+
+  it("only crosses districts on the state pass", () => {
+    const pairs = [pair("A", 0, 10, 0), pair("X", 2000, 10, 200), pair("W1", 0, 1, 0)]
+    expect(plan(pairs, ["A"], false).some((p) => p.kind === "transfer")).toBe(false)
+    const cross = plan(pairs, ["A"], true).find((p) => p.kind === "transfer")
+    expect(cross).toMatchObject({ fromId: "X", isCrossDistrict: true })
+  })
+
+  it("escalates when nobody can help", () => {
+    const out = plan([pair("A", 0, 10, 0), pair("W1", 0, 1, 0)], ["A"], true)
+    expect(out[0]).toMatchObject({ kind: "indent" })
+    expect(out[0].reason).toMatch(/Warehouse short/)
+  })
+})
+
+describe("surges and blocked medicines", () => {
+  it("a surging receiver skips the slow warehouse channel and gets priority 1", () => {
+    const pairs = [{ ...pair("A", 200, 10, 20), surge: true }, pair("B", 1000, 10, 100), pair("W1", 5000, 20, 250)]
+    const out = planRedistribution({
+      facilities,
+      pairs,
+      receivers: [{ ...pairs[0], alertId: "a" }],
+      incoming: new Map(),
+      outgoing: new Map(),
+      settings,
+      crossDistrict: false,
+    })
+    expect(out[0]).toMatchObject({ kind: "transfer", fromId: "B", priority: 1 })
+  })
+
+  it("never recommends a discontinued medicine", () => {
+    const out = planRedistribution({
+      facilities,
+      pairs: [pair("A", 0, 10, 0), pair("B", 1000, 10, 100)],
+      receivers: [{ ...pair("A", 0, 10, 0), alertId: "a" }],
+      incoming: new Map(),
+      outgoing: new Map(),
+      settings,
+      crossDistrict: true,
+      blockedMedicines: new Set(["M"]),
+    })
+    expect(out).toHaveLength(0)
+  })
+})
+
+describe("planNearExpiry", () => {
+  it("moves the part a facility won't use in time to a nearby facility that will", () => {
+    // B holds 600, uses 2/day; a batch of 300 expires in 45 days -> B can use only 90 of it.
+    const out = planNearExpiry({
+      facilities,
+      pairs: [pair("B", 600, 2, 300), pair("A", 50, 10, 5)],
+      batches: [{ facilityId: "B", medicineId: "M", batchNo: "X1", qty: 300, daysToExpiry: 45 }],
+      incoming: new Map(),
+      settings,
+    })
+    expect(out).toHaveLength(1)
+    // A can use 10/day × 45 = 450 before expiry, minus its own 50 -> room for 400; the excess is min(300, 600-90)
+    expect(out[0]).toMatchObject({ fromId: "B", toId: "A", qty: 300, priority: 2 })
+    expect(out[0].reason).toMatch(/Near expiry: batch X1/)
+  })
+
+  it("does not overload a recipient that cannot use it in time", () => {
+    const out = planNearExpiry({
+      facilities,
+      pairs: [pair("B", 600, 2, 300), pair("A", 400, 10, 40)],
+      batches: [{ facilityId: "B", medicineId: "M", batchNo: "X1", qty: 300, daysToExpiry: 45 }],
+      incoming: new Map(),
+      settings,
+    })
+    expect(out.reduce((s, t) => s + t.qty, 0)).toBeLessThanOrEqual(10 * 45 - 400)
+  })
+})
+
+describe("stockAlerts", () => {
+  const th = { lowMultiplier: 2, overstockDays: 90, minAttendanceRate: 0.7 }
+  const fact = (daysLeft: number | null) => ({
+    facilityId: "A",
+    medicineId: "M",
+    medicineName: "Paracetamol 500mg",
+    unit: "tablet",
+    stock: 78,
+    pdu: 53.8,
+    daysLeft,
+    resupplyDays: 7,
+  })
+  it("grades by resupply time", () => {
+    expect(stockAlerts(fact(1.4), th)[0]).toMatchObject({ type: "stockout_risk", severity: "critical" })
+    expect(stockAlerts(fact(10), th)[0]).toMatchObject({ type: "stockout_risk", severity: "warning" })
+    expect(stockAlerts(fact(30), th)).toHaveLength(0)
+    expect(stockAlerts(fact(120), th)[0]).toMatchObject({ type: "overstock", severity: "info" })
+  })
+  it("uses the brief's message template", () => {
+    expect(stockAlerts(fact(1.4), th)[0].message).toBe(
+      "Paracetamol 500mg: 78 tablets left (~1.4 days at 53.8/day). Normal resupply takes 7 days.",
+    )
+  })
+})
