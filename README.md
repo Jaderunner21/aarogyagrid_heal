@@ -4,7 +4,7 @@
 
 AarogyaGrid predicts how much of each medicine every health centre will use over the next 30 days, warns days before something runs out, spots unusual jumps in demand that may signal an outbreak, and suggests the fastest fix: an order from the district warehouse, or spare stock from a nearby health centre. People approve every step; the system keeps the record.
 
-Built for **Google Build with AI: Code for Communities** (Track 03: Smart Health & Supply Chain Resilience).
+**[Live demo](https://aarogyagrid-heal.vercel.app)** · Built for **Google Build with AI: Code for Communities** (Track 03: Smart Health & Supply Chain Resilience).
 
 ![District overview with an outbreak warning, facility map and action queue](docs/screenshots/district-overview.jpg)
 
@@ -92,66 +92,16 @@ Every reply is checked against a strict format. If Gemini is unavailable, every 
 
 Next.js 16 (App Router, React 19, TypeScript) · Tailwind CSS 4 · shadcn/ui + Radix UI · Recharts · Leaflet + OpenStreetMap · Supabase (PostgreSQL, Auth, Row Level Security, Realtime) · Google Gen AI SDK (Gemini Flash) · zod · Vitest · Vercel (hosting and cron)
 
-## Getting started
+## Try it
 
-### Requirements
+**Live demo: [aarogyagrid-heal.vercel.app](https://aarogyagrid-heal.vercel.app)**
 
-- Node.js 20 or newer
-- A [Supabase](https://supabase.com) project
-- A [Google AI Studio](https://aistudio.google.com) API key
+Open the site and pick any account in the **Demo accounts** panel on the login page: one click, no password. Each role sees only its own area. A good tour:
 
-### 1. Install
-
-```bash
-git clone https://github.com/<your-username>/aarogyagrid.git
-cd aarogyagrid
-npm install
-cp .env.example .env.local
-```
-
-Fill in `.env.local`:
-
-| Variable | Where to find it |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Same page. Server only; never expose it. |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Google AI Studio (e.g. a current Flash model) |
-| `CRON_SECRET` | Any long random string |
-| `DEMO_PASSWORD` | The password for the demo accounts |
-| `SUPABASE_DB_URL` | Optional: only for `npm run db:setup` |
-
-### 2. Create the database
-
-Either run everything with one command (needs `SUPABASE_DB_URL`):
-
-```bash
-npm run db:setup
-```
-
-or paste these files into the Supabase SQL editor, in this order:
-
-1. `db/base/01_schema.sql`
-2. `db/base/02_seed.sql`
-3. `db/migrations/002_upgrade.sql`
-4. `db/seed/002_upgrade_seed.sql`
-5. `db/migrations/003_phc_doctors.sql`
-6. `db/migrations/004_state_medicines.sql`
-
-### 3. Create the demo accounts and run
-
-```bash
-npm run demo-users
-npm run dev
-```
-
-Open http://localhost:3000 and use the **Demo accounts** panel to sign in as any role.
-
-## Deploying
-
-1. Push the repository to GitHub and import it in [Vercel](https://vercel.com/new).
-2. Add the same environment variables in Vercel → Project → Settings → Environment Variables (`SUPABASE_DB_URL` is not needed).
-3. Deploy. `vercel.json` schedules the nightly analysis (`/api/cron/daily`, 01:00 UTC); Vercel sends `CRON_SECRET` with each call.
-4. In Supabase → Authentication → URL Configuration, set the **Site URL** to your Vercel address and add `https://<your-app>.vercel.app/**` to the redirect URLs, so invitation links work.
+1. **Dungarpur · district** (Dr. Farida Khan): an outbreak warning, the facility map with district borders, and the action queue of suggested orders and transfers.
+2. **PHC · Doctor**, then choose **PHC Malpur**: the doctor's day at a glance and staff requests waiting for sign-off. Switch to **Staff** to see the phone view and voice entry.
+3. **Gujarat · state admin** (Dr. Kiran Desai): transfers between districts, and the Admin console with medicine requests from PHCs.
+4. **India · national admin** (Dr. Meera Iyer): both states on one map, state comparison and forecast accuracy.
 
 ## Demo data
 
@@ -161,7 +111,7 @@ Open http://localhost:3000 and use the **Demo accounts** panel to sign in as any
 
 ### Demo accounts
 
-All use `DEMO_PASSWORD`, or sign in with one click from the login page.
+Sign in with one click from the login page.
 
 | Role | Email |
 |---|---|
