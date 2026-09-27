@@ -1,7 +1,7 @@
 // Database setup over SUPABASE_DB_URL: the base schema and seed (db/base) plus the upgrades (db/migrations, db/seed).
 //   npm run db:setup  -> 01_schema.sql (skipped if tables exist) + 02_seed.sql (skipped if already seeded)
 //                        + db/migrations/002_upgrade.sql (safe to re-run) + db/seed/002_upgrade_seed.sql (skipped if Gujarat exists)
-//                        + db/migrations/003_phc_doctors.sql + 004_state_medicines.sql + 005_hierarchy_items_beds.sql + 006_faster_engine_series.sql + 007_scanned_batches.sql + 008_stockout_reports.sql (safe to re-run)
+//                        + db/migrations/003_phc_doctors.sql + 004_state_medicines.sql + 005_hierarchy_items_beds.sql + 006_faster_engine_series.sql + 007_scanned_batches.sql + 008_stockout_reports.sql + 009_fhir_and_fixes.sql (safe to re-run)
 //                        + db/seed/005_expansion_seed.sql (skipped if sub-centres exist)
 //   npm run db:reset  -> 03_reset.sql + 01_schema.sql + 02_seed.sql + 002 upgrade + demo users   (wipes all app data)
 //   npm run db:types  -> regenerate src/lib/database.types.ts from the live project
@@ -89,6 +89,7 @@ async function upgrade(client: Client) {
   await run(client, "db/migrations/006_faster_engine_series.sql")
   await run(client, "db/migrations/007_scanned_batches.sql")
   await run(client, "db/migrations/008_stockout_reports.sql")
+  await run(client, "db/migrations/009_fhir_and_fixes.sql")
 }
 
 async function reset(client: Client) {

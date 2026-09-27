@@ -73,6 +73,19 @@ Each person sees only their own area. This is enforced by the database (Row Leve
 
 How the real-world supply chain works today, and how AarogyaGrid maps onto it: [today](docs/screenshots/diagram-real-system.png) · [AarogyaGrid](docs/screenshots/diagram-aarogyagrid.png).
 
+### Data exchange (FHIR R4)
+
+A read-only [HL7 FHIR R4](https://hl7.org/fhir/R4/) API at `/api/fhir`, so state, national and ABDM-style systems can read AarogyaGrid's data in the standard format:
+
+| Resource | From |
+|---|---|
+| `Organization`, `Location` | Facilities (with HFR ids, level of care, position, supplier), districts and states |
+| `Medication`, `Device` | The item catalogue with GS1 barcodes (medicines, vaccines and oxygen; consumables and test kits) |
+| `SupplyRequest` | Warehouse orders and transfers |
+| `SupplyDelivery` | Dispatches and receipts, with the batch numbers and expiry dates that were sent |
+
+`GET /api/fhir/metadata` describes the server. Callers sign in like any user (browser session, or `Authorization: Bearer <Supabase access token>`) and see only what their role allows. Search by `facility`, `district`, `status`, `identifier` (facility code, HFR id or GTIN), with `_count` and `_page`.
+
 ### Forecasting
 
 - **Holt-Winters** (level, damped trend, weekly pattern) fitted to recent history, with a **same-season-last-year** adjustment so monsoon diarrhoea and post-monsoon malaria are expected before they arrive.
@@ -160,7 +173,6 @@ npm run typecheck
 
 - Connect to states' existing drug inventory software (e-Aushadhi / DVDMS)
 - Block level
-- Standard health-data export (FHIR)
 - Monthly orders with many medicines
 - Offline mode for PHCs with poor connectivity
 - SMS / WhatsApp alerts
