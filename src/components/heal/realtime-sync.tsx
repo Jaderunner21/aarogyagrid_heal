@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 // Tables whose changes move the maps, alert feeds, action queues, pipeline board and bell.
 // Beds and attendance reach viewers through `forecasts`: every PHC save re-runs that facility's forecast.
 // Row-level security applies to Realtime too, so each person only hears about their own scope.
-const TABLES = ["transfers", "indents", "alerts", "stock", "outbreaks", "forecasts", "medicine_requests"] as const
+const TABLES = ["transfers", "indents", "alerts", "stock", "outbreaks", "forecasts", "medicine_requests", "stockout_reports"] as const
 const DEBOUNCE_MS = 1500
 const MIN_GAP_MS = 6000
 const FALLBACK_POLL_MS = 60_000

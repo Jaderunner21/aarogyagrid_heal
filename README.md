@@ -23,10 +23,12 @@ AarogyaGrid predicts how much of each medicine every health centre will use over
 - **Looks ahead.** A 30-day forecast for every medicine at every facility, using weekly patterns, seasons, patient numbers and recent trends.
 - **Warns early.** *Critical* when a medicine will run out before a normal delivery can arrive; *low* when it is getting close. Also expiry, staff-shortage and bed-pressure alerts.
 - **Spots surges and possible outbreaks.** A medicine used far faster than normal raises a surge alert; three or more PHCs surging on the same kind of medicine in one district raises a possible-outbreak alert for the district and the state.
+- **"We've run out" in one tap.** When an item runs out mid-day, staff or the doctor tap one button. The district officer and warehouse are told at once, and a transfer from the nearest facility that can spare it is waiting for approval. The day's numbers are still entered later as usual.
 - **Suggests the fix.** A warehouse order when there is time; otherwise a transfer from the nearest facility that can spare stock and still keep 45 days' worth. Stock close to expiry is offered to a facility that will use it in time.
 - **People decide.** The PHC doctor signs off staff requests, the district officer approves orders and transfers, the state admin approves moves between districts. Stock changes only when the receiver confirms delivery.
 - **Live for everyone in scope.** Screens update within seconds of any change, from the PHC to the national dashboard.
 - **Follows the real chain of care.** Sub-centres are resupplied by their PHC; PHCs (day or 24×7), CHCs and district hospitals by the district warehouse. Each level has its own catalogue, so a sub-centre is never offered oxygen and only 24×7 PHCs stock delivery drugs.
+- **Scans the pack.** A GS1 barcode (the DataMatrix on medicine packs) gives the batch number and expiry, so expiry alerts and first-expiry-first-out use the date printed on the pack. Expired stock is refused at receipt. Works with the phone camera on Android, or a handheld scanner.
 - **More than medicines.** Oxygen, consumables, vaccines and diagnostic kits are tracked the same way. Beds are counted by type (general, maternity, ICU, HDU, NICU and more), and a full ICU for three days raises a critical alert.
 
 ## Screens
@@ -158,7 +160,6 @@ npm run typecheck
 
 - Connect to states' existing drug inventory software (e-Aushadhi / DVDMS)
 - Block level
-- Barcode scanning of batch and expiry (GS1)
 - Standard health-data export (FHIR)
 - Monthly orders with many medicines
 - Offline mode for PHCs with poor connectivity

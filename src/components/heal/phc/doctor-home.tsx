@@ -11,7 +11,8 @@ import { RecommendationList } from "@/components/heal/recommendation-list"
 import { ActionList, type ActionItem } from "@/components/heal/phc/action-list"
 import { toViewer, type Session } from "@/lib/session"
 import { createClient } from "@/lib/supabase/server"
-import { enrich, getAlerts, getBedsByType, getIndents, getStock, getTransfers } from "@/lib/queries"
+import { enrich, getAlerts, getBedsByType, getIndents, getOpenStockouts, getStock, getTransfers } from "@/lib/queries"
+import { OpenStockouts, StockoutButton } from "@/components/heal/phc/stockout-button"
 import { formatNumber } from "@/lib/format"
 import { urgency } from "@/lib/status"
 import { t } from "@/lib/i18n"
@@ -29,7 +30,7 @@ export async function DoctorHome({ session }: { session: Session }) {
   const today = format(now, "yyyy-MM-dd")
   const weekAgo = format(subDays(now, 7), "yyyy-MM-dd")
 
-  const [stock, submitted, transfers, dispatchedIndents, alerts, reports, facility, staff, attendance, bedsByType, fromSubCentres] = await Promise.all([
+  const [stock, submitted, transfers, dispatchedIndents, alerts, reports, facility, staff, attendance, bedsByType, fromSubCentres, openOuts] = await Promise.all([
     getStock(db, { facilityId: fid }),
     getIndents(db, { facilityId: fid, status: ["submitted"] }),
     getTransfers(db, { facilityId: fid, status: ["approved", "dispatched"] }),
@@ -42,6 +43,7 @@ export async function DoctorHome({ session }: { session: Session }) {
     getBedsByType(db, fid),
     // indents from the sub-centres this PHC supplies
     getIndents(db, { warehouseId: fid, status: ["submitted", "approved"] }),
+    getOpenStockouts(db, fid),
   ])
   const subCentreWaiting = fromSubCentres.filter((i) => i.status === "submitted" && !i.awaitingMo)
   const subCentreToSend = fromSubCentres.filter((i) => i.status === "approved")
@@ -73,7 +75,15 @@ export async function DoctorHome({ session }: { session: Session }) {
       <PageHeader
         title={`${session.facility?.name ?? ""} · ${t(lang, "doc.title")}`}
         description={`${session.districtName ?? ""} · ${session.profile.full_name}`}
+        actions={
+          <StockoutButton
+            lang={lang}
+            facilityId={fid}
+            items={stock.map((r) => ({ id: r.medicineId, name: r.medicineName, unit: r.unit, quantity: r.quantity }))}
+          />
+        }
       />
+      <OpenStockouts lang={lang} reports={openOuts} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

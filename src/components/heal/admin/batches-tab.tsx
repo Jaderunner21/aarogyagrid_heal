@@ -17,6 +17,8 @@ import type { AdminFacility } from "@/components/heal/admin/facilities-tab"
 import { createClient } from "@/lib/supabase/client"
 import { runRpc } from "@/lib/client-actions"
 import { formatDate, formatNumber } from "@/lib/format"
+import { ScanButton } from "@/components/heal/barcode-scanner"
+import { toGtin14 } from "@/lib/gs1"
 
 export type AdminBatch = {
   id: string
@@ -55,7 +57,7 @@ export function BatchesTab({
   districts: { id: string; name: string }[]
   facilities: AdminFacility[]
   batches: AdminBatch[]
-  medicines: { id: string; name: string; unit: string }[]
+  medicines: { id: string; name: string; unit: string; gtin: string | null }[]
   wastage: Wastage[]
 }) {
   const [today] = useState(() => new Date())
@@ -205,7 +207,13 @@ function WriteOff({ batch }: { batch: Row }) {
   )
 }
 
-function AddBatchDialog({ facilities, medicines }: { facilities: AdminFacility[]; medicines: { id: string; name: string; unit: string }[] }) {
+function AddBatchDialog({
+  facilities,
+  medicines,
+}: {
+  facilities: AdminFacility[]
+  medicines: { id: string; name: string; unit: string; gtin: string | null }[]
+}) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -215,6 +223,7 @@ function AddBatchDialog({ facilities, medicines }: { facilities: AdminFacility[]
   const [expiry, setExpiry] = useState("")
   const [qty, setQty] = useState("")
   const ready = facility && medicine && batchNo.trim() && expiry && Number(qty) > 0
+  const [scanNote, setScanNote] = useState<string | null>(null)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -226,9 +235,29 @@ function AddBatchDialog({ facilities, medicines }: { facilities: AdminFacility[]
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Register a batch</DialogTitle>
-          <DialogDescription>For stock already on the shelf that isn&apos;t in a batch yet. New receipts get batches automatically.</DialogDescription>
+          <DialogDescription>For stock already on the shelf that isn&apos;t in a batch yet. Scan the pack to fill in the item, batch and expiry. Transfers and orders bring their batches with them.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+            <ScanButton
+              lang="en"
+              label="Scan pack"
+              onScan={(s) => {
+                const m = s.gtin ? medicines.find((x) => x.gtin && toGtin14(x.gtin) === s.gtin) : undefined
+                if (m) setMedicine(m.id)
+                if (s.batch) setBatchNo(s.batch)
+                if (s.expiry) setExpiry(s.expiry)
+                setScanNote(
+                  s.gtin && !m
+                    ? `Barcode ${s.gtin} is not linked to an item; choose the medicine.`
+                    : !s.batch || !s.expiry
+                      ? "This code has no batch or expiry; type them from the pack."
+                      : null,
+                )
+              }}
+            />
+            {scanNote ? <span className="text-muted-foreground text-xs">{scanNote}</span> : null}
+          </div>
           <div className="grid gap-1.5 sm:col-span-2">
             <Label htmlFor="b-facility">Facility</Label>
             <Select value={facility} onValueChange={setFacility}>

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { BedDouble, Check, Loader2, Mic, NotebookPen, Plus, Save, UserMinus, UserPlus, Users, X } from "lucide-react"
+import { BedDouble, Check, Loader2, Mic, NotebookPen, Plus, Save, ScanBarcode, UserMinus, UserPlus, Users, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/heal/empty-state"
 import { ConfirmDialog } from "@/components/heal/admin/confirm-dialog"
 import { StatusIcon } from "@/components/heal/status-badge"
 import { VoiceEntry } from "@/components/heal/phc/voice-entry"
+import { ScanReceive } from "@/components/heal/phc/scan-receive"
 import { createClient } from "@/lib/supabase/client"
 import { announceChange, refreshForecast } from "@/lib/client-actions"
 import { formatNumber } from "@/lib/format"
@@ -41,6 +42,7 @@ export function EntryTabs(props: Props) {
   const tabs = [
     { value: "usage", label: t(lang, "phc.usage"), icon: NotebookPen },
     { value: "voice", label: t(lang, "phc.voice"), icon: Mic },
+    { value: "scan", label: t(lang, "scan.tab"), icon: ScanBarcode },
     { value: "report", label: t(lang, "phc.dailyReport"), icon: BedDouble },
     { value: "attendance", label: t(lang, "phc.attendance"), icon: Users },
   ]
@@ -59,6 +61,9 @@ export function EntryTabs(props: Props) {
       </TabsContent>
       <TabsContent value="voice">
         <VoiceEntry lang={lang} userId={props.userId} facilityId={props.facilityId} today={props.today} stock={props.stock} totalBeds={props.totalBeds} />
+      </TabsContent>
+      <TabsContent value="scan">
+        <ScanReceive lang={lang} stock={props.stock} facilityId={props.facilityId} userId={props.userId} today={props.today} />
       </TabsContent>
       <TabsContent value="report">
         <ReportForm {...props} />

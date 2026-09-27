@@ -33,6 +33,8 @@ type TransferRow = {
   updated_at: string
 }
 
+type StockoutReportRow = { id: string; facility_id: string; medicine_id: string; reported_by: string | null; reported_at: string; note: string | null; stock_on_record: number; resolved_at: string | null; resolved_reason: string | null }
+
 type IndentRow = {
   id: string
   facility_id: string
@@ -273,6 +275,8 @@ export type Database = {
           note: string | null
           created_by: string | null
           created_at: string
+          batch_no: string | null
+          expiry_date: string | null
         }
         Insert: {
           facility_id: string
@@ -281,6 +285,8 @@ export type Database = {
           qty_used?: number
           qty_received?: number
           qty_out?: number
+          batch_no?: string | null
+          expiry_date?: string | null
           source?: Database["public"]["Enums"]["log_source"]
           ref_id?: string | null
           note?: string | null
@@ -561,6 +567,12 @@ export type Database = {
         Row: { id: string; district_id: string; name: string; address: string | null; lat: number; lng: number; created_at: string }
         Insert: { id?: string; district_id: string; name: string; address?: string | null; lat: number; lng: number; created_at?: string }
         Update: Partial<{ district_id: string; name: string; address: string | null; lat: number; lng: number }>
+        Relationships: []
+      }
+      stockout_reports: {
+        Row: StockoutReportRow
+        Insert: Partial<StockoutReportRow> & { facility_id: string; medicine_id: string }
+        Update: Partial<StockoutReportRow>
         Relationships: []
       }
       medicine_requests: {
@@ -868,6 +880,8 @@ export type Database = {
       }
       admin_set_facility_beds: { Args: { p_id: string; p_beds: Json }; Returns: Database["public"]["Tables"]["facilities"]["Row"] }
       admin_set_registry_ids: { Args: { p_person: string; p_hpr_id: string }; Returns: ProfileRow }
+      report_stockout: { Args: { p_facility: string; p_medicine: string; p_note?: string | null }; Returns: StockoutReportRow }
+      withdraw_stockout: { Args: { p_id: string }; Returns: StockoutReportRow }
       item_allowed: { Args: { p_facility: string; p_item: string }; Returns: boolean }
       engine_critical_beds: {
         Args: { p_district?: string; p_days?: number }

@@ -21,6 +21,7 @@ import { runRpc } from "@/lib/client-actions"
 import { formatDate } from "@/lib/format"
 import type { Enums, ItemType, Tables, Tier } from "@/lib/database.types"
 import { ITEM_TYPE_LABEL, ITEM_TYPES, TIER_LABEL, TIERS } from "@/lib/facility-types"
+import { ScanButton } from "@/components/heal/barcode-scanner"
 
 type Medicine = Tables<"medicines">
 const FACILITY_TYPES: { value: Enums<"facility_type">; label: string }[] = [
@@ -345,7 +346,10 @@ function MedicineDialog({
           </label>
           <div className="grid gap-1.5 sm:col-span-2">
             <Label htmlFor="m-gtin">Barcode (GTIN, optional)</Label>
-            <Input id="m-gtin" inputMode="numeric" value={gtin} onChange={(e) => setGtin(e.target.value)} placeholder="8901234500013" />
+            <div className="flex gap-2">
+              <Input id="m-gtin" inputMode="numeric" value={gtin} onChange={(e) => setGtin(e.target.value)} placeholder="8901234500019" />
+              <ScanButton lang="en" label="Scan" onScan={(s) => s.gtin && setGtin(s.gtin.replace(/^0/, ""))} />
+            </div>
           </div>
           <fieldset className="grid gap-1.5 sm:col-span-2">
             <legend className="mb-1 text-sm font-medium">Stocked at</legend>

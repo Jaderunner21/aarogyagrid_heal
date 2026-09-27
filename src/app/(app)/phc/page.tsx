@@ -11,7 +11,8 @@ import { StatusIcon } from "@/components/heal/status-badge"
 import { ActionList, type ActionItem } from "@/components/heal/phc/action-list"
 import { requireRole } from "@/lib/session"
 import { createClient } from "@/lib/supabase/server"
-import { getAlerts, getIndents, getStock, getTransfers } from "@/lib/queries"
+import { getAlerts, getIndents, getOpenStockouts, getStock, getTransfers } from "@/lib/queries"
+import { OpenStockouts, StockoutButton } from "@/components/heal/phc/stockout-button"
 import { formatDateTime, formatNumber } from "@/lib/format"
 import { urgency } from "@/lib/status"
 import { t } from "@/lib/i18n"
@@ -26,7 +27,7 @@ export default async function PhcToday() {
   const fid = session.profile.facility_id!
   const db = await createClient()
 
-  const [stock, transfers, indents, alerts, lastEntry, subCentreIndents] = await Promise.all([
+  const [stock, transfers, indents, alerts, lastEntry, subCentreIndents, openOuts] = await Promise.all([
     getStock(db, { facilityId: fid }),
     getTransfers(db, { facilityId: fid, status: ["approved", "dispatched"] }),
     getIndents(db, { facilityId: fid, status: ["dispatched"] }),
@@ -41,6 +42,7 @@ export default async function PhcToday() {
       .maybeSingle(),
     // approved indents from the sub-centres this PHC supplies: this PHC sends them
     getIndents(db, { warehouseId: fid, status: ["approved"] }),
+    getOpenStockouts(db, fid),
   ])
 
   const count = (s: string) => stock.filter((r) => r.status === s).length
@@ -61,14 +63,22 @@ export default async function PhcToday() {
           lastEntry.data ? formatDateTime(lastEntry.data.created_at) : t(lang, "phc.never")
         }`}
         actions={
-          <Button asChild className="h-11 px-4">
-            <Link href="/phc/entry">
-              <NotebookPen aria-hidden="true" />
-              {t(lang, "phc.recordToday")}
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <StockoutButton
+              lang={lang}
+              facilityId={fid}
+              items={stock.map((r) => ({ id: r.medicineId, name: r.medicineName, unit: r.unit, quantity: r.quantity }))}
+            />
+            <Button asChild className="h-11 px-4">
+              <Link href="/phc/entry">
+                <NotebookPen aria-hidden="true" />
+                {t(lang, "phc.recordToday")}
+              </Link>
+            </Button>
+          </div>
         }
       />
+      <OpenStockouts lang={lang} reports={openOuts} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label={t(lang, "phc.critical")} value={count("critical")} sub={t(lang, "phc.criticalHint")} status="critical" icon={AlertOctagon} />

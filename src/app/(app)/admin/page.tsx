@@ -152,7 +152,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   } else if (tab === "batches") {
     const facilityIds = facilities.map((f) => f.id)
     const batches: AdminBatch[] = []
-    const { data: meds } = await db.from("medicines").select("id, name, unit, status")
+    const { data: meds } = await db.from("medicines").select("id, name, unit, status, gtin")
     const med = new Map((meds ?? []).map((m) => [m.id, m]))
     for (let i = 0; i < facilityIds.length; i += 40) {
       for (let from = 0; ; from += 1000) {
@@ -196,7 +196,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       <BatchesTab
         {...common}
         batches={batches}
-        medicines={(meds ?? []).map((m) => ({ id: m.id, name: m.name, unit: m.unit }))}
+        medicines={(meds ?? []).map((m) => ({ id: m.id, name: m.name, unit: m.unit, gtin: m.gtin }))}
         wastage={(wastage ?? []).map((w) => ({
           facilityName: facilityById.get(w.facility_id)?.name ?? "",
           medicineName: med.get(w.medicine_id)?.name ?? "",

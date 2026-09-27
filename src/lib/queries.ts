@@ -2,6 +2,7 @@
 // Every read goes through the caller's RLS.
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { subDays, format } from "date-fns"
+import { formatNumber } from "@/lib/format"
 import type { Database, Enums, ItemType, Json, Tables, Tier, Views } from "@/lib/database.types"
 import { toStatus, type StockStatus } from "@/lib/status"
 
@@ -694,3 +695,57 @@ export async function getMedicineRequests(
     createdAt: r.created_at ?? "",
   }))
 }
+
+/** Items a facility has reported out ("We've run out"), still waiting for stock. */
+export async function getOpenStockouts(db: DB, facilityId: string) {
+  const { data } = await db
+    .from("stockout_reports")
+    .select("id, medicine_id, reported_at, medicines(name)")
+    .eq("facility_id", facilityId)
+    .is("resolved_at", null)
+    .order("reported_at", { ascending: false })
+  const reports = data ?? []
+  if (!reports.length) return []
+  const meds = reports.map((r) => r.medicine_id)
+  // what is on its way or waiting for approval for these items
+  const [{ data: tr }, { data: ind }] = await Promise.all([
+    db
+      .from("v_transfers")
+      .select("medicine_id, qty, unit, from_name, distance_km, status, created_at")
+      .eq("to_facility_id", facilityId)
+      .in("medicine_id", meds)
+      .in("status", ["proposed", "approved", "dispatched"])
+      .order("created_at", { ascending: false }),
+    db
+      .from("v_indents")
+      .select("medicine_id, qty_requested, unit, warehouse_name, status, created_at")
+      .eq("facility_id", facilityId)
+      .in("medicine_id", meds)
+      .in("status", ["submitted", "approved", "dispatched"])
+      .order("created_at", { ascending: false }),
+  ])
+  const now = Date.now()
+  return reports.map((r) => {
+    const t = (tr ?? []).find((x) => x.medicine_id === r.medicine_id)
+    const i = (ind ?? []).find((x) => x.medicine_id === r.medicine_id)
+    const help: StockoutHelp | null = t
+      ? {
+          text: `${formatNumber(Number(t.qty))} ${t.unit}s from ${t.from_name}${t.distance_km ? ` (${Math.round(Number(t.distance_km))} km)` : ""}`,
+          status: t.status as StockoutHelp["status"],
+        }
+      : i
+        ? { text: `${formatNumber(Number(i.qty_requested))} ${i.unit}s from ${i.warehouse_name}`, status: i.status as StockoutHelp["status"] }
+        : null
+    return {
+      id: r.id,
+      medicineId: r.medicine_id,
+      medicineName: (r as unknown as { medicines: { name: string } | null }).medicines?.name ?? "",
+      reportedAt: r.reported_at,
+      help,
+      // just reported: the district re-plan is still running
+      planning: !help && now - new Date(r.reported_at).getTime() < 3 * 60_000,
+    }
+  })
+}
+
+export type StockoutHelp = { text: string; status: "proposed" | "submitted" | "approved" | "dispatched" }

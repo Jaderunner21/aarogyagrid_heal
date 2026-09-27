@@ -435,6 +435,23 @@ export async function runEngine(
     }
   }
 
+  // "We've run out" reports from staff: the item is out, whatever the record says, until stock
+  // arrives or the report is withdrawn (db/migrations/008_stockout_reports.sql)
+  const reportedOut = new Map<string, { at: string; stockOnRecord: number }>()
+  for (let i = 0; i < scopeFacilityIds.length; i += 100) {
+    const { data } = await db
+      .from("stockout_reports")
+      .select("facility_id, medicine_id, reported_at, stock_on_record")
+      .in("facility_id", scopeFacilityIds.slice(i, i + 100))
+      .is("resolved_at", null)
+    for (const r of data ?? []) reportedOut.set(`${r.facility_id}:${r.medicine_id}`, { at: r.reported_at, stockOnRecord: Number(r.stock_on_record) })
+  }
+  for (const p of pairs) {
+    if (!reportedOut.has(`${p.facilityId}:${p.medicineId}`)) continue
+    p.stock = 0
+    p.fc = { ...p.fc, daysLeft: 0, stockoutDate: today }
+  }
+
   const forecastRows: TablesInsert<"forecasts">[] = pairs.map((p) => ({
     facility_id: p.facilityId,
     medicine_id: p.medicineId,
@@ -461,7 +478,18 @@ export async function runEngine(
     const f = fac.get(p.facilityId)
     const m = med.get(p.medicineId)
     if (!f || !m) continue
-    if (m.status === "active") {
+    const report = reportedOut.get(`${p.facilityId}:${p.medicineId}`)
+    if (report) {
+      const at = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(report.at))
+      desired.push({
+        facilityId: p.facilityId,
+        medicineId: p.medicineId,
+        type: "stockout_risk",
+        severity: "critical",
+        daysLeft: 0,
+        message: `${m.name}: reported out of stock by staff at ${at} (the record showed ${Math.round(report.stockOnRecord)}). Uses about ${(p.fc.predictedDailyUse ?? 0).toFixed(1)} ${m.unit}s a day; normal resupply takes ${f.resupply_days} days.`,
+      })
+    } else if (m.status === "active") {
       desired.push(
         ...stockAlerts(
           {
