@@ -26,6 +26,8 @@ AarogyaGrid predicts how much of each medicine every health centre will use over
 - **Suggests the fix.** A warehouse order when there is time; otherwise a transfer from the nearest facility that can spare stock and still keep 45 days' worth. Stock close to expiry is offered to a facility that will use it in time.
 - **People decide.** The PHC doctor signs off staff requests, the district officer approves orders and transfers, the state admin approves moves between districts. Stock changes only when the receiver confirms delivery.
 - **Live for everyone in scope.** Screens update within seconds of any change, from the PHC to the national dashboard.
+- **Follows the real chain of care.** Sub-centres are resupplied by their PHC; PHCs (day or 24×7), CHCs and district hospitals by the district warehouse. Each level has its own catalogue, so a sub-centre is never offered oxygen and only 24×7 PHCs stock delivery drugs.
+- **More than medicines.** Oxygen, consumables, vaccines and diagnostic kits are tracked the same way. Beds are counted by type (general, maternity, ICU, HDU, NICU and more), and a full ICU for three days raises a critical alert.
 
 ## Screens
 
@@ -48,7 +50,9 @@ Each person sees only their own area. This is enforced by the database (Row Leve
 | Role | What they do |
 |---|---|
 | **PHC staff** | Daily usage and receipts (form or voice), patients, beds, attendance; raise orders; send and receive transfers. English and Hindi. |
-| **PHC doctor** | Patients, beds, staff and low medicines at a glance; signs off staff orders; asks for medicines that are not on the list. |
+| **PHC doctor** | Patients, beds, staff and low medicines at a glance; signs off staff orders and orders from the PHC's sub-centres; asks for medicines that are not on the list. |
+| **Sub-centre staff (ANM)** | Daily usage and receipts; orders go to their PHC, not the warehouse. |
+| **CHC / district hospital** | The same staff and doctor views, with beds by type (ICU, HDU, NICU and more). |
 | **Warehouse manager** | Dispatches approved orders and transfers; watches warehouse stock. |
 | **District officer** | Map of every facility, surge and outbreak alerts, AI action queue; approves orders and transfers; supports or turns down new-medicine requests. |
 | **State admin** | District comparison, medicines at risk, moves between districts; keeps the state's own medicine list; admin console for the state. |
@@ -72,6 +76,8 @@ How the real-world supply chain works today, and how AarogyaGrid maps onto it: [
 - **Holt-Winters** (level, damped trend, weekly pattern) fitted to recent history, with a **same-season-last-year** adjustment so monsoon diarrhoea and post-monsoon malaria are expected before they arrive.
 - Days when the shelf was empty or nothing was reported are treated as **missing, not zero demand**.
 - For acute medicines, a **patient-count forecast** (medicine used per patient × expected patients) is blended in, weighted by how accurate each method has been. Chronic medicines use their own history.
+- **Oxygen follows occupied ICU, HDU and NICU beds** instead of patient numbers.
+- Maternal-care items at facilities with a **LaQshya**-certified labour room are handled first when stock is short.
 - Facilities with under a year of history **borrow seasonal patterns** from their district, state or the whole country.
 - Every forecast is **back-tested** on the last 14 days; accuracy is shown per state.
 
@@ -100,13 +106,15 @@ Open the site and pick any account in the **Demo accounts** panel on the login p
 
 1. **Dungarpur · district** (Dr. Farida Khan): an outbreak warning, the facility map with district borders, and the action queue of suggested orders and transfers.
 2. **PHC · Doctor**, then choose **PHC Malpur**: the doctor's day at a glance and staff requests waiting for sign-off. Switch to **Staff** to see the phone view and voice entry.
-3. **Gujarat · state admin** (Dr. Kiran Desai): transfers between districts, and the Admin console with medicine requests from PHCs.
-4. **India · national admin** (Dr. Meera Iyer): both states on one map, state comparison and forecast accuracy.
+3. **Health facilities**, then choose **SHC Obri**: a sub-centre whose orders go to PHC Sagwara. Then try **District Hospital Dungarpur · Doctor** to see ICU and HDU beds by type.
+4. **Gujarat · state admin** (Dr. Kiran Desai): transfers between districts, and the Admin console with medicine requests from PHCs.
+5. **India · national admin** (Dr. Meera Iyer): both states on one map, state comparison and forecast accuracy.
 
 ## Demo data
 
-- **2 states, 5 districts, 36 PHCs, 5 district warehouses, 15 medicines**, about 14 months of daily history with realistic seasons.
-- Facility names are real places in Udaipur, Rajsamand and Dungarpur (Rajasthan) and Aravalli and Sabarkantha (Gujarat). **All stock, patient and staff numbers are made up.**
+- **2 states, 5 districts, 36 PHCs, 12 sub-centres, 2 CHCs, 2 district hospitals, 5 district warehouses and 26 items** (medicines, oxygen, consumables, vaccines, diagnostic kits), about 14 months of daily history with realistic seasons.
+- Jan Aushadhi stores can be shown on the map for reference; they are not part of the government stock chain.
+- Facility names are real places in Udaipur, Rajsamand and Dungarpur (Rajasthan) and Aravalli and Sabarkantha (Gujarat). **All stock, patient and staff numbers are made up.** Sub-centre names, registry IDs (HFR, HPR), barcodes and LaQshya certifications are illustrative.
 - `db/demo/simulate_outbreak.sql` creates a fever and diarrhoea surge at three PHCs in Dungarpur; press **Run analysis** as the Dungarpur district officer to see the outbreak alert.
 
 ### Demo accounts
@@ -121,6 +129,8 @@ Sign in with one click from the login page.
 | Warehouse managers | `wh.udaipur@`, `wh.rajsamand@`, `wh.dungarpur@`, `wh.aravalli@`, `wh.sabarkantha@heal.demo` |
 | PHC staff | `phc.<facility-code>@heal.demo`, e.g. `phc.phc-udr-04@heal.demo` |
 | PHC doctors | `mo.<facility-code>@heal.demo`, e.g. `mo.phc-arv-03@heal.demo` |
+| Sub-centre staff | `shc.<facility-code>@heal.demo`, e.g. `shc.shc-dgp-01@heal.demo` |
+| CHC / district hospital | `staff.<facility-code>@heal.demo` and `mo.<facility-code>@heal.demo`, e.g. `mo.dh-dgp@heal.demo` |
 
 ## Project structure
 
@@ -130,8 +140,8 @@ src/lib/engine/     forecasting, alerts, redistribution (with tests)
 src/lib/ai/         Gemini calls, prompts and response checks
 src/components/     maps, charts, tables, dialogs, PHC and doctor screens
 db/base/            base schema and Rajasthan demo data
-db/migrations/      national level, surges, batches, admin console, doctors, medicine lists
-db/seed/, db/demo/  Gujarat demo data; outbreak simulation
+db/migrations/      national level, surges, batches, admin console, doctors, medicine lists, facility levels and beds
+db/seed/, db/demo/  Gujarat, sub-centre and hospital demo data; outbreak simulation
 public/geo/         district and state boundaries (OpenStreetMap)
 scripts/            database setup and demo accounts
 ```
@@ -147,7 +157,9 @@ npm run typecheck
 ## Roadmap
 
 - Connect to states' existing drug inventory software (e-Aushadhi / DVDMS)
-- Block level, CHCs, sub-centres and district hospitals
+- Block level
+- Barcode scanning of batch and expiry (GS1)
+- Standard health-data export (FHIR)
 - Monthly orders with many medicines
 - Offline mode for PHCs with poor connectivity
 - SMS / WhatsApp alerts

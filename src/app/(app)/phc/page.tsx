@@ -26,7 +26,7 @@ export default async function PhcToday() {
   const fid = session.profile.facility_id!
   const db = await createClient()
 
-  const [stock, transfers, indents, alerts, lastEntry] = await Promise.all([
+  const [stock, transfers, indents, alerts, lastEntry, subCentreIndents] = await Promise.all([
     getStock(db, { facilityId: fid }),
     getTransfers(db, { facilityId: fid, status: ["approved", "dispatched"] }),
     getIndents(db, { facilityId: fid, status: ["dispatched"] }),
@@ -39,6 +39,8 @@ export default async function PhcToday() {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // approved indents from the sub-centres this PHC supplies: this PHC sends them
+    getIndents(db, { warehouseId: fid, status: ["approved"] }),
   ])
 
   const count = (s: string) => stock.filter((r) => r.status === s).length
@@ -47,6 +49,7 @@ export default async function PhcToday() {
     ...transfers.filter((x) => x.status === "approved" && x.fromId === fid).map((item) => ({ mode: "dispatch" as const, item })),
     ...transfers.filter((x) => x.status === "dispatched" && x.toId === fid).map((item) => ({ mode: "receive" as const, item })),
     ...indents.map((item) => ({ mode: "receive" as const, item })),
+    ...subCentreIndents.map((item) => ({ mode: "dispatch" as const, item })),
   ]
   const sorted = [...stock].sort((a, b) => urgency(a.status, a.daysLeft) - urgency(b.status, b.daysLeft))
 

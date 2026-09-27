@@ -48,6 +48,8 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
 
   const { data: facilityRows } = await db.from("facilities").select("*").in("district_id", districtIds).order("name")
   const facilityById = new Map((facilityRows ?? []).map((f) => [f.id, f]))
+  const { data: bedRows } = await db.from("facility_beds").select("facility_id, bed_type, total")
+  const bedsOf = (fid: string) => Object.fromEntries((bedRows ?? []).filter((b) => b.facility_id === fid).map((b) => [b.bed_type, b.total]))
   const facilities: AdminFacility[] = (facilityRows ?? []).map((f) => ({
     id: f.id,
     name: f.name,
@@ -65,6 +67,10 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
     supplyingWarehouseName: f.supplying_warehouse ? (facilityById.get(f.supplying_warehouse)?.name ?? "") : null,
     isActive: f.is_active,
     openedOn: f.opened_on,
+    phc24x7: f.phc_24x7,
+    hfrId: f.hfr_id,
+    hfrExtensions: f.hfr_extensions,
+    beds: bedsOf(f.id),
   }))
 
   const scopeLabel = isNational ? "All states" : (states[0]?.name ?? "")
@@ -103,6 +109,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
           isActive: p.is_active,
           inScope,
           phcPosition: p.phc_position ?? "staff",
+          hprId: p.hpr_id ?? null,
         }
       })
       .filter((p) => p.inScope)

@@ -4,7 +4,13 @@ import type { FacilitySummary, TransferView } from "@/lib/queries"
 export type MapFacility = Pick<
   FacilitySummary,
   "id" | "name" | "type" | "lat" | "lng" | "critical" | "low" | "openAlerts" | "districtId" | "districtName" | "status"
-> & { openSurges?: number }
+> & {
+  openSurges?: number
+  phc24x7?: boolean
+  laqshya?: boolean
+  criticalBedsTotal?: number
+  criticalBedsOccupied?: number
+}
 export type MapTransfer = Pick<TransferView, "id" | "fromLat" | "fromLng" | "toLat" | "toLng" | "status"> & {
   label: string
 }

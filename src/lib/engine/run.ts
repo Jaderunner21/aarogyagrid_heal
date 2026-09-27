@@ -19,6 +19,7 @@ import {
 import {
   alertKey,
   bedAlert,
+  bedTypeAlert,
   expiryAlert,
   footfallSurgeAlert,
   staffAlert,
@@ -93,11 +94,68 @@ function num(v: Json | undefined, fallback: number): number {
   return typeof v === "number" ? v : fallback
 }
 
-// The heaviest query; under load Postgres can hit its statement timeout, so try once more.
-async function districtSeries(db: DB, districtId: string) {
-  const res = await db.rpc("engine_series2", { p_district: districtId, p_days: HISTORY })
-  if (res.error && /timeout/i.test(res.error.message)) return db.rpc("engine_series2", { p_district: districtId, p_days: HISTORY })
-  return res
+type SeriesRow = {
+  facility_id: string
+  medicine_id: string
+  facility_type: Tables<"facilities">["type"]
+  district_id: string
+  resupply_days: number
+  stock: number
+  used: number[]
+  received: number[]
+  outflow: number[]
+  wasted: number[]
+  reported: boolean[]
+}
+type SeriesResult = { data: SeriesRow[] | null; error: { message: string } | null }
+
+// The heaviest query. The database sends only the days with entries (engine_series3);
+// every other day is filled in here as zero / not reported.
+async function fetchSeries(db: DB, districtId: string): Promise<SeriesResult> {
+  let res = await db.rpc("engine_series3", { p_district: districtId, p_days: HISTORY })
+  // under load Postgres can hit its statement timeout, so try once more
+  if (res.error && /timeout/i.test(res.error.message)) res = await db.rpc("engine_series3", { p_district: districtId, p_days: HISTORY })
+  if (res.error) return { data: null, error: res.error }
+  const data = (res.data ?? []).map((r): SeriesRow => {
+    const zeros = () => new Array<number>(HISTORY).fill(0)
+    const used = zeros(), received = zeros(), outflow = zeros(), wasted = zeros()
+    const reported = new Array<boolean>(HISTORY).fill(false)
+    r.idx.forEach((i, k) => {
+      used[i] = Number(r.used[k])
+      received[i] = Number(r.received[k])
+      outflow[i] = Number(r.outflow[k])
+      wasted[i] = Number(r.wasted[k])
+    })
+    r.reported_idx.forEach((i) => (reported[i] = true))
+    return {
+      facility_id: r.facility_id,
+      medicine_id: r.medicine_id,
+      facility_type: r.facility_type,
+      district_id: r.district_id,
+      resupply_days: r.resupply_days,
+      stock: Number(r.stock),
+      used,
+      received,
+      outflow,
+      wasted,
+      reported,
+    }
+  })
+  return { data, error: null }
+}
+
+// The history stops at yesterday, so one fetch serves a whole run: the seasonal pooling and
+// the district passes share it instead of asking the database twice.
+const seriesCache = new Map<string, { at: number; p: Promise<SeriesResult> }>()
+function districtSeries(db: DB, districtId: string): Promise<SeriesResult> {
+  const hit = seriesCache.get(districtId)
+  if (hit && Date.now() - hit.at < 120_000) return hit.p
+  const p = fetchSeries(db, districtId).then((r) => {
+    if (r.error) seriesCache.delete(districtId)
+    return r
+  })
+  seriesCache.set(districtId, { at: Date.now(), p })
+  return p
 }
 
 async function loadSettings(db: DB) {
@@ -153,13 +211,13 @@ export async function loadSeasonalProfiles(db: DB, today: string, force = false)
   const { data: districts } = await db.from("districts").select("id, state_id")
   const groups = new Map<string, number[]>()
   const add = (k: string, r: number) => groups.set(k, [...(groups.get(k) ?? []), r])
-  const seriesByDistrict = await Promise.all(
-    (districts ?? []).map(async (d) => {
-      const { data, error } = await districtSeries(db, d.id)
-      if (error) throw new Error(`engine_series2: ${error.message}`)
-      return { d, data: data ?? [] }
-    }),
-  )
+  // one district at a time: a small database copes better than with all of them at once
+  const seriesByDistrict: { d: NonNullable<typeof districts>[number]; data: SeriesRow[] }[] = []
+  for (const d of districts ?? []) {
+    const { data, error } = await districtSeries(db, d.id)
+    if (error) throw new Error(`engine_series3: ${error.message}`)
+    seriesByDistrict.push({ d, data: data ?? [] })
+  }
   for (const { d, data } of seriesByDistrict) {
     for (const row of data) {
       if (row.facility_type === "warehouse") continue
@@ -308,17 +366,21 @@ export async function runEngine(
   const footfallSurge = new Map<string, SurgeCheck>()
   const inputs = await Promise.all(
     districtIds.map(async (districtId) => {
-      const [series, footfall] = await Promise.all([
+      const [series, footfall, critical] = await Promise.all([
         districtSeries(db, districtId),
         db.rpc("engine_footfall", { p_district: districtId, p_days: HISTORY }),
+        db.rpc("engine_critical_beds", { p_district: districtId, p_days: HISTORY }),
       ])
-      return { districtId, series, footfall }
+      return { districtId, series, footfall, critical }
     }),
   )
-  for (const { districtId, series, footfall } of inputs) {
+  for (const { districtId, series, footfall, critical } of inputs) {
     const stateId = districtState.get(districtId) ?? ""
-    if (series.error) throw new Error(`engine_series2: ${series.error.message}`)
+    if (series.error) throw new Error(`engine_series3: ${series.error.message}`)
     const ff = new Map((footfall.data ?? []).map((f) => [f.facility_id, { values: f.footfall.map(Number), reported: f.reported }]))
+    // oxygen follows occupied critical-care beds (ICU + HDU + NICU); without those, all occupied beds
+    const beds = new Map((footfall.data ?? []).map((f) => [f.facility_id, { values: f.occupied.map(Number), reported: f.reported }]))
+    for (const c of critical.data ?? []) beds.set(c.facility_id, { values: c.occupied.map(Number), reported: c.reported })
 
     // facility-level footfall surge: an early signal for acute medicines
     for (const [fid, f] of ff) {
@@ -355,9 +417,11 @@ export async function runEngine(
         surge = detectSurge(y, miss, params, { threshold: footfallSurge.has(row.facility_id) && acute ? 1.4 : 1.8, minPerDay: 5 })
       }
 
+      const oxygen = m?.item_type === "oxygen"
       const fc = forecastSeries(input, today, params, {
         pooled: pooledFor(pooled, districtId, stateId, row.medicine_id),
-        footfall: !input.isWarehouse && acute ? (ff.get(row.facility_id) ?? null) : null,
+        // the demand driver: patients for acute items, occupied (critical-care) beds for oxygen
+        footfall: input.isWarehouse ? null : oxygen ? (beds.get(row.facility_id) ?? null) : acute ? (ff.get(row.facility_id) ?? null) : null,
         surge: Boolean(surge?.surging),
       })
       pairs.push({
@@ -475,9 +539,11 @@ export async function runEngine(
   for (const districtId of districtIds) {
     const ids = phcIds.filter((fid) => fac.get(fid)?.district_id === districtId)
     if (!ids.length) continue
-    const [staff, reports] = await Promise.all([
+    const [staff, reports, bedTypes, occupancy] = await Promise.all([
       db.from("staff").select("id, facility_id").in("facility_id", ids).eq("is_active", true),
       db.from("daily_reports").select("facility_id, report_date, occupied_beds").in("facility_id", ids).gte("report_date", daysAgo(10)).order("report_date", { ascending: false }),
+      db.from("facility_beds").select("facility_id, bed_type, total").in("facility_id", ids),
+      db.from("daily_bed_occupancy").select("facility_id, report_date, bed_type, occupied").in("facility_id", ids).gte("report_date", daysAgo(10)).order("report_date", { ascending: false }).limit(5000),
     ])
     const staffFac = new Map((staff.data ?? []).map((s) => [s.id, s.facility_id]))
     const att = staffFac.size
@@ -487,8 +553,25 @@ export async function runEngine(
       const rows = att.filter((a) => staffFac.get(a.staff_id) === fid)
       const rate = rows.length ? rows.filter((a) => a.present).length / rows.length : null
       desired.push(...staffAlert(fid, rate, thresholds))
-      const last3 = (reports.data ?? []).filter((r) => r.facility_id === fid).slice(0, 3).map((r) => r.occupied_beds)
-      desired.push(...bedAlert(fid, fac.get(fid)?.total_beds ?? 0, last3))
+      const f = fac.get(fid)
+      // day-only PHCs keep observation beds that empty every evening, and sub-centres have none: no bed pressure there
+      if (!f || f.type === "shc" || (f.type === "phc" && !f.phc_24x7)) continue
+      const types = (bedTypes.data ?? []).filter((b) => b.facility_id === fid)
+      if (types.length) {
+        desired.push(
+          ...bedTypeAlert(
+            fid,
+            types.map((t) => ({
+              bedType: t.bed_type,
+              total: t.total,
+              lastThree: (occupancy.data ?? []).filter((o) => o.facility_id === fid && o.bed_type === t.bed_type).slice(0, 3).map((o) => o.occupied),
+            })),
+          ),
+        )
+      } else {
+        const last3 = (reports.data ?? []).filter((r) => r.facility_id === fid).slice(0, 3).map((r) => r.occupied_beds)
+        desired.push(...bedAlert(fid, f.total_beds, last3))
+      }
     }
   }
 
@@ -673,6 +756,7 @@ export async function runEngine(
         pdu: p.fc.predictedDailyUse,
         daysLeft: p.fc.daysLeft,
         surge: Boolean(p.surge),
+        priority: isPriorityItem(fac.get(p.facilityId), med.get(p.medicineId)),
         alertId: a.id,
       }
     })
@@ -798,6 +882,13 @@ export async function runEngine(
     explain,
     followUpDistrict: null,
   }
+}
+
+/** Maternal items at a LaQshya-certified facility (labour room quality standard) are planned first. */
+function isPriorityItem(f: Tables<"facilities"> | undefined, m: Tables<"medicines"> | undefined): boolean {
+  if (!f || !m || m.program !== "maternal") return false
+  const ext = f.hfr_extensions
+  return Boolean(ext && typeof ext === "object" && !Array.isArray(ext) && "laqshya" in ext)
 }
 
 /** All facility ids in a scope (service role). */

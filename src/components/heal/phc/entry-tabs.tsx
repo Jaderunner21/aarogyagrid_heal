@@ -17,7 +17,7 @@ import { createClient } from "@/lib/supabase/client"
 import { announceChange, refreshForecast } from "@/lib/client-actions"
 import { formatNumber } from "@/lib/format"
 import type { StockRow } from "@/lib/queries"
-import type { Enums, Tables } from "@/lib/database.types"
+import type { AttendanceStatus, BedType, Enums, Tables } from "@/lib/database.types"
 import { t, type Lang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -32,6 +32,8 @@ type Props = {
   report: Tables<"daily_reports"> | null
   staff: Tables<"staff">[]
   attendance: Tables<"attendance">[]
+  /** beds by type with today's occupancy, if the facility tracks beds by type */
+  beds: { bedType: BedType; total: number; occupied: number | null }[]
 }
 
 export function EntryTabs(props: Props) {
@@ -183,25 +185,36 @@ function UsageForm({ lang, stock, facilityId, userId }: Props) {
 }
 
 // ------------------------------------------------------------------ daily report
-function ReportForm({ lang, facilityId, userId, today, totalBeds, report }: Props) {
+function ReportForm({ lang, facilityId, userId, today, totalBeds, report, beds }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [footfall, setFootfall] = useState(report ? String(report.footfall) : "")
-  const [beds, setBeds] = useState(report ? String(report.occupied_beds) : "")
-  const bedsInvalid = Number(beds) > totalBeds || Number(beds) < 0
+  const [occupied, setOccupied] = useState(report ? String(report.occupied_beds) : "")
+  // with beds by type, each type is entered and the total is their sum
+  const byType = beds.length > 0
+  const [typeOcc, setTypeOcc] = useState<Record<string, string>>(() =>
+    Object.fromEntries(beds.map((b) => [b.bedType, b.occupied === null ? "" : String(b.occupied)])),
+  )
+  const typeInvalid = beds
+    .filter((b) => Number(typeOcc[b.bedType] || 0) > b.total || Number(typeOcc[b.bedType] || 0) < 0)
+    .map((b) => b.bedType)
+  const totalInvalid = !byType && (Number(occupied) > totalBeds || Number(occupied) < 0)
+  const invalid = totalInvalid || typeInvalid.length > 0
+  const typedSum = beds.reduce((sum, b) => sum + Number(typeOcc[b.bedType] || 0), 0)
 
   function save(e: React.FormEvent) {
     e.preventDefault()
-    if (bedsInvalid) return
+    if (invalid) return
     startTransition(async () => {
-      const { error } = await createClient()
+      const db = createClient()
+      const { error } = await db
         .from("daily_reports")
         .upsert(
           {
             facility_id: facilityId,
             report_date: today,
             footfall: Number(footfall || 0),
-            occupied_beds: Number(beds || 0),
+            occupied_beds: byType ? typedSum : Number(occupied || 0),
             created_by: userId,
           },
           { onConflict: "facility_id,report_date" },
@@ -209,6 +222,22 @@ function ReportForm({ lang, facilityId, userId, today, totalBeds, report }: Prop
       if (error) {
         toast.error(error.message)
         return
+      }
+      if (byType) {
+        const { error: occError } = await db.from("daily_bed_occupancy").upsert(
+          beds.map((b) => ({
+            facility_id: facilityId,
+            report_date: today,
+            bed_type: b.bedType,
+            occupied: Number(typeOcc[b.bedType] || 0),
+            created_by: userId,
+          })),
+          { onConflict: "facility_id,report_date,bed_type" },
+        )
+        if (occError) {
+          toast.error(occError.message)
+          return
+        }
       }
       toast.success(t(lang, "phc.reportSaved"))
       router.refresh()
@@ -223,23 +252,56 @@ function ReportForm({ lang, facilityId, userId, today, totalBeds, report }: Prop
         <Label htmlFor="footfall">{t(lang, "phc.footfall")}</Label>
         <Input id="footfall" type="number" inputMode="numeric" min={0} value={footfall} onChange={(e) => setFootfall(e.target.value)} className="h-11 text-base" />
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="beds">
-          {t(lang, "phc.occupiedBeds")} ({t(lang, "phc.bedsOf")} {totalBeds})
-        </Label>
-        <Input
-          id="beds"
-          type="number"
-          inputMode="numeric"
-          min={0}
-          max={totalBeds}
-          value={beds}
-          onChange={(e) => setBeds(e.target.value)}
-          className={cn("h-11 text-base", bedsInvalid && "border-critical")}
-          aria-invalid={bedsInvalid}
-        />
-      </div>
-      <Button type="submit" disabled={pending || bedsInvalid} className="h-11">
+      {byType ? (
+        <fieldset className="grid gap-2">
+          <legend className="mb-1 text-sm font-medium">{t(lang, "phc.occupiedBeds")}</legend>
+          {beds.map((b) => {
+            const bad = typeInvalid.includes(b.bedType)
+            return (
+              <div key={b.bedType} className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-3">
+                <Label htmlFor={`beds-${b.bedType}`} className="font-normal">
+                  {t(lang, `bed.${b.bedType}`)}{" "}
+                  <span className="text-muted-foreground text-xs">
+                    ({t(lang, "phc.bedsOf")} {b.total})
+                  </span>
+                </Label>
+                <Input
+                  id={`beds-${b.bedType}`}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={b.total}
+                  value={typeOcc[b.bedType] ?? ""}
+                  onChange={(e) => setTypeOcc((m) => ({ ...m, [b.bedType]: e.target.value }))}
+                  className={cn("h-11 text-base", bad && "border-critical")}
+                  aria-invalid={bad}
+                />
+              </div>
+            )
+          })}
+          <p className="text-muted-foreground text-xs">
+            {t(lang, "phc.bedsTotal")}: {typedSum} / {totalBeds}
+          </p>
+        </fieldset>
+      ) : (
+        <div className="grid gap-1.5">
+          <Label htmlFor="beds">
+            {t(lang, "phc.occupiedBeds")} ({t(lang, "phc.bedsOf")} {totalBeds})
+          </Label>
+          <Input
+            id="beds"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={totalBeds}
+            value={occupied}
+            onChange={(e) => setOccupied(e.target.value)}
+            className={cn("h-11 text-base", totalInvalid && "border-critical")}
+            aria-invalid={totalInvalid}
+          />
+        </div>
+      )}
+      <Button type="submit" disabled={pending || invalid} className="h-11">
         {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
         {t(lang, "phc.save")}
       </Button>
@@ -276,20 +338,27 @@ function RemoveStaff({ lang, staffId, name }: { lang: Lang; staffId: string; nam
   )
 }
 
+const ATTENDANCE_OPTIONS: AttendanceStatus[] = ["present_on_duty", "absent", "on_leave", "on_deputation"]
 const STAFF_ROLES: Enums<"staff_role">[] = ["medical_officer", "nurse", "pharmacist", "lab_technician", "health_worker", "other"]
 const roleLabel = (r: string) => r.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
 
 function AttendanceForm({ lang, facilityId, userId, today, staff, attendance }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [marks, setMarks] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(attendance.map((a) => [a.staff_id, a.present])),
+  const [marks, setMarks] = useState<Record<string, AttendanceStatus>>(() =>
+    Object.fromEntries(attendance.map((a) => [a.staff_id, a.status ?? (a.present ? "present_on_duty" : "absent")])),
   )
   const [name, setName] = useState("")
   const [role, setRole] = useState<Enums<"staff_role">>("nurse")
 
   function save() {
-    const rows = Object.entries(marks).map(([staff_id, present]) => ({ staff_id, att_date: today, present, marked_by: userId }))
+    const rows = Object.entries(marks).map(([staff_id, status]) => ({
+      staff_id,
+      att_date: today,
+      status,
+      present: status === "present_on_duty",
+      marked_by: userId,
+    }))
     if (rows.length === 0) {
       toast.info(t(lang, "phc.nothingToSave"))
       return
@@ -329,7 +398,7 @@ function AttendanceForm({ lang, facilityId, userId, today, staff, attendance }: 
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setMarks(Object.fromEntries(staff.map((s) => [s.id, true])))}
+            onClick={() => setMarks(Object.fromEntries(staff.map((s) => [s.id, "present_on_duty" as const])))}
             disabled={staff.length === 0}
           >
             <Check aria-hidden="true" />
@@ -347,25 +416,26 @@ function AttendanceForm({ lang, facilityId, userId, today, staff, attendance }: 
                   <p className="text-muted-foreground text-xs">{roleLabel(s.role)}</p>
                 </div>
                 <RemoveStaff lang={lang} staffId={s.id} name={s.name} />
-                <div className="flex gap-1" role="radiogroup" aria-label={`${s.name} attendance`}>
-                  {[true, false].map((present) => {
-                    const active = marks[s.id] === present
+                <div className="grid grid-cols-2 gap-1 sm:flex" role="radiogroup" aria-label={`${s.name} attendance`}>
+                  {ATTENDANCE_OPTIONS.map((status) => {
+                    const active = marks[s.id] === status
                     return (
                       <button
-                        key={String(present)}
+                        key={status}
                         type="button"
                         role="radio"
                         aria-checked={active}
-                        onClick={() => setMarks((m) => ({ ...m, [s.id]: present }))}
+                        onClick={() => setMarks((m) => ({ ...m, [s.id]: status }))}
                         className={cn(
-                          "flex h-11 min-w-24 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors",
-                          active && present && "border-ok bg-green-50 text-ok",
-                          active && !present && "border-critical bg-red-50 text-critical",
+                          "flex h-11 min-w-20 items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition-colors",
+                          active && status === "present_on_duty" && "border-ok bg-green-50 text-ok",
+                          active && status === "absent" && "border-critical bg-red-50 text-critical",
+                          active && (status === "on_leave" || status === "on_deputation") && "border-amber-300 bg-amber-50 text-amber-800",
                           !active && "text-muted-foreground hover:bg-muted",
                         )}
                       >
-                        {present ? <Check className="size-4" aria-hidden="true" /> : <X className="size-4" aria-hidden="true" />}
-                        {t(lang, present ? "phc.present" : "phc.absent")}
+                        {status === "present_on_duty" ? <Check className="size-4" aria-hidden="true" /> : status === "absent" ? <X className="size-4" aria-hidden="true" /> : null}
+                        {t(lang, `att.${status}`)}
                       </button>
                     )
                   })}

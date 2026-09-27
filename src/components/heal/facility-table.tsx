@@ -5,6 +5,7 @@ import { Warehouse } from "lucide-react"
 import { StatusBadge } from "@/components/heal/status-badge"
 import { formatDaysLeft, formatNumber, formatPercent } from "@/lib/format"
 import type { FacilitySummary } from "@/lib/queries"
+import { TIER_LABEL } from "@/lib/facility-types"
 import { STATUS_ORDER } from "@/lib/status"
 import { cn } from "@/lib/utils"
 
@@ -50,7 +51,10 @@ export function FacilityTable({ rows, hrefBase }: { rows: FacilitySummary[]; hre
                     {f.type === "warehouse" ? <Warehouse className="text-muted-foreground size-4" aria-label="Warehouse" /> : null}
                     {f.name}
                   </span>
-                  <span className="text-muted-foreground text-xs">{f.code}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {f.code} · {TIER_LABEL[f.tier]}
+                    {f.laqshya ? " · LaQshya" : ""}
+                  </span>
                 </td>
                 <td className="px-3 py-2.5">
                   <StatusBadge status={f.status} size="sm" />
@@ -59,7 +63,12 @@ export function FacilityTable({ rows, hrefBase }: { rows: FacilitySummary[]; hre
                 <td className={cn("px-3 py-2.5 text-right", f.low > 0 && "text-low")}>{f.low}</td>
                 <td className="px-3 py-2.5 text-right">{formatDaysLeft(f.minDaysLeft)}</td>
                 <td className="px-3 py-2.5 text-right">
-                  {f.type === "warehouse" ? "—" : `${formatNumber(f.occupiedBeds ?? 0)} / ${formatNumber(f.totalBeds)}`}
+                  {f.type === "warehouse" || f.type === "shc" ? "—" : `${formatNumber(f.occupiedBeds ?? 0)} / ${formatNumber(f.totalBeds)}`}
+                  {f.criticalBedsTotal ? (
+                    <span className={cn("block text-[11px]", f.criticalBedsOccupied >= f.criticalBedsTotal ? "text-critical font-medium" : "text-muted-foreground")}>
+                      ICU/HDU/NICU {f.criticalBedsOccupied}/{f.criticalBedsTotal}
+                    </span>
+                  ) : null}
                 </td>
                 <td className={cn("px-3 py-2.5 text-right", (f.attendance7d ?? 1) < 0.7 && "text-critical font-medium")}>
                   {formatPercent(f.attendance7d)}

@@ -11,7 +11,7 @@ import { RecommendationList } from "@/components/heal/recommendation-list"
 import { ActionList, type ActionItem } from "@/components/heal/phc/action-list"
 import { toViewer, type Session } from "@/lib/session"
 import { createClient } from "@/lib/supabase/server"
-import { enrich, getAlerts, getIndents, getStock, getTransfers } from "@/lib/queries"
+import { enrich, getAlerts, getBedsByType, getIndents, getStock, getTransfers } from "@/lib/queries"
 import { formatNumber } from "@/lib/format"
 import { urgency } from "@/lib/status"
 import { t } from "@/lib/i18n"
@@ -29,7 +29,7 @@ export async function DoctorHome({ session }: { session: Session }) {
   const today = format(now, "yyyy-MM-dd")
   const weekAgo = format(subDays(now, 7), "yyyy-MM-dd")
 
-  const [stock, submitted, transfers, dispatchedIndents, alerts, reports, facility, staff, attendance] = await Promise.all([
+  const [stock, submitted, transfers, dispatchedIndents, alerts, reports, facility, staff, attendance, bedsByType, fromSubCentres] = await Promise.all([
     getStock(db, { facilityId: fid }),
     getIndents(db, { facilityId: fid, status: ["submitted"] }),
     getTransfers(db, { facilityId: fid, status: ["approved", "dispatched"] }),
@@ -38,8 +38,13 @@ export async function DoctorHome({ session }: { session: Session }) {
     db.from("daily_reports").select("report_date, footfall, occupied_beds").eq("facility_id", fid).gte("report_date", weekAgo).order("report_date"),
     db.from("facilities").select("total_beds").eq("id", fid).maybeSingle(),
     db.from("staff").select("id, name, role").eq("facility_id", fid).eq("is_active", true).order("name"),
-    db.from("attendance").select("staff_id, present").eq("att_date", today),
+    db.from("attendance").select("staff_id, present, status").eq("att_date", today),
+    getBedsByType(db, fid),
+    // indents from the sub-centres this PHC supplies
+    getIndents(db, { warehouseId: fid, status: ["submitted", "approved"] }),
   ])
+  const subCentreWaiting = fromSubCentres.filter((i) => i.status === "submitted" && !i.awaitingMo)
+  const subCentreToSend = fromSubCentres.filter((i) => i.status === "approved")
 
   const waiting = submitted.filter((i) => i.awaitingMo)
   const rows = reports.data ?? []
@@ -49,6 +54,7 @@ export async function DoctorHome({ session }: { session: Session }) {
   const totalBeds = facility.data?.total_beds ?? 0
   const staffRows = staff.data ?? []
   const marks = new Map((attendance.data ?? []).map((a) => [a.staff_id, a.present]))
+  const statuses = new Map((attendance.data ?? []).map((a) => [a.staff_id, a.status ?? (a.present ? "present_on_duty" : "absent")]))
   const present = staffRows.filter((s) => marks.get(s.id) === true).length
   const marked = staffRows.filter((s) => marks.has(s.id)).length
   const atRisk = [...stock]
@@ -58,6 +64,7 @@ export async function DoctorHome({ session }: { session: Session }) {
     ...transfers.filter((x) => x.status === "approved" && x.fromId === fid).map((item) => ({ mode: "dispatch" as const, item })),
     ...transfers.filter((x) => x.status === "dispatched" && x.toId === fid).map((item) => ({ mode: "receive" as const, item })),
     ...dispatchedIndents.map((item) => ({ mode: "receive" as const, item })),
+    ...subCentreToSend.map((item) => ({ mode: "dispatch" as const, item })),
   ]
   const roleLabel = (r: string) => r.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
 
@@ -115,6 +122,17 @@ export async function DoctorHome({ session }: { session: Session }) {
         />
       </Section>
 
+      {subCentreWaiting.length ? (
+        <Section
+          title={t(lang, "doc.subCentres")}
+          description={t(lang, "doc.subCentresHint")}
+          className="border-amber-300 ring-4 ring-amber-100"
+          bodyClassName="p-3"
+        >
+          <RecommendationList items={enrich(subCentreWaiting, stock)} viewer={toViewer(session)} emptyIcon={ClipboardCheck} emptyText="" compact lang={lang} />
+        </Section>
+      ) : null}
+
       {actions.length ? (
         <Section title={t(lang, "phc.needsAction")} className="border-primary/40 ring-primary/10 ring-4">
           <ActionList items={actions} lang={lang} />
@@ -147,6 +165,23 @@ export async function DoctorHome({ session }: { session: Session }) {
         </Section>
 
         <div className="space-y-5">
+          {bedsByType.length ? (
+            <Section title={t(lang, "doc.bedsByType")} bodyClassName="p-0">
+              <ul className="divide-y">
+                {bedsByType.map((b) => {
+                  const full = b.occupied !== null && b.total > 0 && b.occupied / b.total >= 0.9
+                  return (
+                    <li key={b.bedType} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                      <span className="flex-1 font-medium">{t(lang, `bed.${b.bedType}`)}</span>
+                      <span className={cn("tabular-nums", full ? "text-critical font-semibold" : "text-muted-foreground")}>
+                        {b.occupied ?? "—"} / {b.total}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </Section>
+          ) : null}
           <Section title={t(lang, "doc.staffToday")} bodyClassName="p-0">
             <ul className="divide-y">
               {staffRows.map((s) => {
@@ -165,7 +200,7 @@ export async function DoctorHome({ session }: { session: Session }) {
                         m === undefined && "bg-muted text-muted-foreground",
                       )}
                     >
-                      {m === true ? t(lang, "phc.present") : m === false ? t(lang, "phc.absent") : t(lang, "doc.notMarkedShort")}
+                      {m === undefined ? t(lang, "doc.notMarkedShort") : t(lang, `att.${statuses.get(s.id) ?? "absent"}`)}
                     </span>
                   </li>
                 )

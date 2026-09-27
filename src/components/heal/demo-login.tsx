@@ -35,7 +35,10 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
     return [...groups.entries()]
   }, [phcs])
   const selectedPhc = phcs.find((p) => p.scope === phcCode)
-  const phcAccount = accounts.find((a) => a.role === "phc_staff" && a.scope === phcCode && (a.phcPosition ?? "staff") === position)
+  // sub-centres have no doctor: always the staff login
+  const noDoctor = selectedPhc?.facilityType === "shc"
+  const effectivePosition = noDoctor ? "staff" : position
+  const phcAccount = accounts.find((a) => a.role === "phc_staff" && a.scope === phcCode && (a.phcPosition ?? "staff") === effectivePosition)
   const phcEmail = phcAccount?.email ?? null
 
   function signInAs(email: string) {
@@ -98,7 +101,7 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
 
         <section aria-labelledby="demo-phc" className="space-y-2">
           <h3 id="demo-phc" className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            PHC · {phcs.length} facilities
+            Health facilities · {phcs.length}
           </h3>
           <div className="bg-muted flex gap-1 rounded-lg p-1" role="radiogroup" aria-label="PHC login">
             {(["staff", "medical_officer"] as const).map((p) => {
@@ -109,13 +112,15 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
                   key={p}
                   type="button"
                   role="radio"
-                  aria-checked={position === p}
+                  aria-checked={effectivePosition === p}
+                  disabled={noDoctor && p === "medical_officer"}
+                  title={noDoctor && p === "medical_officer" ? "Sub-centres have no doctor" : undefined}
                   onClick={() => setPosition(p)}
                   className={cn(
-                    "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-sm font-medium",
-                    position === p ? "bg-background shadow-sm" : "text-muted-foreground",
+                    "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-sm font-medium disabled:opacity-40",
+                    effectivePosition === p ? "bg-background shadow-sm" : "text-muted-foreground",
                   )}
-                  style={position === p ? { color: VIEW_COLOR[kind].fg } : undefined}
+                  style={effectivePosition === p ? { color: VIEW_COLOR[kind].fg } : undefined}
                 >
                   <Icon className="size-4" aria-hidden="true" />
                   {p === "medical_officer" ? "Doctor" : "Staff"}
@@ -131,14 +136,14 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
                   variant="outline"
                   role="combobox"
                   aria-expanded={phcOpen}
-                  aria-label="Choose a PHC"
+                  aria-label="Choose a facility"
                   className="h-11 min-w-0 flex-1 justify-between px-3 font-normal"
                   disabled={busy}
                 >
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Building2 className="text-primary" aria-hidden="true" />
                     <span className="truncate">
-                      {selectedPhc ? `${selectedPhc.label} · ${selectedPhc.district}` : "Choose a PHC"}
+                      {selectedPhc ? `${selectedPhc.label} · ${selectedPhc.district}` : "Choose a PHC, sub-centre or hospital"}
                     </span>
                   </span>
                   <ChevronsUpDown className="text-muted-foreground" aria-hidden="true" />
@@ -146,15 +151,15 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
               </PopoverTrigger>
               <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
                 <Command>
-                  <CommandInput placeholder="Search PHC, district or state…" />
+                  <CommandInput placeholder="Search facility, district or state…" />
                   <CommandList>
-                    <CommandEmpty>No PHC found.</CommandEmpty>
+                    <CommandEmpty>No facility found.</CommandEmpty>
                     {phcGroups.map(([group, items]) => (
                       <CommandGroup key={group} heading={group}>
                         {items.map((p) => (
                           <CommandItem
                             key={p.email}
-                            value={`${p.label} ${p.district} ${p.state} ${p.scope}`}
+                            value={`${p.label} ${p.district} ${p.state} ${p.scope} ${LEVEL[p.facilityType ?? "phc"]}`}
                             data-checked={p.scope === phcCode}
                             onSelect={() => {
                               setPhcCode(p.scope)
@@ -163,6 +168,9 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
                           >
                             <Building2 className="text-muted-foreground" aria-hidden="true" />
                             <span className="truncate">{p.label}</span>
+                            {p.facilityType && p.facilityType !== "phc" ? (
+                              <span className="bg-muted text-muted-foreground rounded px-1.5 text-[10px] font-medium">{LEVEL[p.facilityType]}</span>
+                            ) : null}
                             <span className="text-muted-foreground ml-auto text-xs">{p.scope}</span>
                           </CommandItem>
                         ))}
@@ -187,6 +195,8 @@ export function DemoLogin({ accounts }: { accounts: DemoAccount[] }) {
     </Card>
   )
 }
+
+const LEVEL = { shc: "Sub-centre", phc: "PHC", chc: "CHC", dh: "District hospital" } as const
 
 function AccountButton({
   acc,

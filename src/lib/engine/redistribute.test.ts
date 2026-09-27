@@ -141,3 +141,60 @@ describe("stockAlerts", () => {
     )
   })
 })
+
+describe("sub-centres and priority items", () => {
+  const withShc: PlanFacility[] = [
+    ...facilities,
+    { id: "S", name: "SHC S", type: "shc", districtId: "D1", lat: 24.61, lng: 73.71, resupplyDays: 7, supplyingWarehouse: "A" },
+  ]
+  const run = (pairs: PairFact[], receivers: { id: string; priority?: boolean }[]) =>
+    planRedistribution({
+      facilities: withShc,
+      pairs,
+      receivers: receivers.map((r) => ({ ...pairs.find((p) => p.facilityId === r.id)!, priority: r.priority, alertId: `alert-${r.id}` })),
+      incoming: new Map(),
+      outgoing: new Map(),
+      settings,
+      crossDistrict: true,
+    })
+
+  it("supplies a sub-centre from its PHC, even when urgent, never by transfer", () => {
+    // S is out; its PHC A has 1000 at 10/day (spare 1000 − 450 = 550); PHC B also has spare nearby
+    const out = run([pair("S", 0, 2, 0), pair("A", 1000, 10, 100), pair("B", 1000, 10, 100), pair("W1", 5000, 20, 250)], [{ id: "S" }])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ kind: "indent", facilityId: "S", warehouseId: "A", qty: 60 })
+    expect(out[0].reason).toMatch(/PHC A has/)
+  })
+
+  it("escalates a sub-centre when its PHC is short, instead of pulling from other PHCs", () => {
+    const out = run([pair("S", 0, 2, 0), pair("A", 100, 10, 10), pair("B", 1000, 10, 100)], [{ id: "S" }])
+    expect(out.every((p) => p.kind === "indent")).toBe(true)
+    expect(out[0].reason).toMatch(/PHC A is short too/)
+  })
+
+  it("never uses a sub-centre as a donor", () => {
+    const out = run([pair("B", 0, 10, 0), pair("S", 5000, 1, 5000), pair("W1", 0, 1, 0)], [{ id: "B" }])
+    expect(out.some((p) => p.kind === "transfer" && p.fromId === "S")).toBe(false)
+  })
+
+  it("never offers a sub-centre's near-expiry stock to other facilities", () => {
+    const out = planNearExpiry({
+      facilities: withShc,
+      pairs: [pair("S", 600, 2, 300), pair("A", 50, 10, 5)],
+      batches: [{ facilityId: "S", medicineId: "M", batchNo: "X1", qty: 300, daysToExpiry: 45 }],
+      incoming: new Map(),
+      settings,
+    })
+    expect(out).toHaveLength(0)
+  })
+
+  it("plans priority items first and marks them urgent", () => {
+    // A (priority, 12 days left) and C (normal, 3 days left) compete for B's spare 550
+    const out = run([pair("A", 120, 10, 12), pair("C", 30, 10, 3), pair("B", 1000, 10, 100), pair("W1", 0, 1, 0)], [
+      { id: "C" },
+      { id: "A", priority: true },
+    ])
+    const first = out.find((p) => p.kind === "transfer")!
+    expect(first).toMatchObject({ toId: "A", priority: 1 })
+  })
+})

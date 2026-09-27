@@ -6,6 +6,8 @@ import L from "leaflet"
 import { CircleMarker, GeoJSON, MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet"
 import type { Feature, FeatureCollection, Geometry } from "geojson"
 import type { MapFacility, MapTransfer } from "@/lib/map"
+import { createClient } from "@/lib/supabase/client"
+import { FACILITY_TYPE_LABEL } from "@/lib/facility-types"
 import { STATUS_META } from "@/lib/status"
 import { formatNumber } from "@/lib/format"
 
@@ -23,6 +25,46 @@ function warehouseIcon(color: string) {
     iconSize: [18, 18],
     iconAnchor: [9, 9],
   })
+}
+
+/** Hospitals (CHC, district hospital): a white disc with a coloured cross, bigger for the district hospital. */
+function hospitalIcon(color: string, big: boolean) {
+  const s = big ? 26 : 20
+  return L.divIcon({
+    className: "",
+    html: `<div style="width:${s}px;height:${s}px;border-radius:50%;background:#fff;border:3px solid ${color};box-shadow:0 1px 3px rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center"><svg width="${s - 10}" height="${s - 10}" viewBox="0 0 10 10"><path d="M4 1h2v3h3v2H6v3H4V6H1V4h3z" fill="${color}"/></svg></div>`,
+    iconSize: [s, s],
+    iconAnchor: [s / 2, s / 2],
+  })
+}
+
+const kendraIcon = L.divIcon({
+  className: "",
+  html: `<div style="width:14px;height:14px;transform:rotate(45deg);background:#fff;border:2px solid #7C3AED;box-shadow:0 1px 2px rgba(15,23,42,.3)"></div>`,
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+})
+
+type Kendra = { id: string; name: string; address: string | null; lat: number; lng: number; district_id: string }
+
+/** Jan Aushadhi Kendras in the districts on the map (where patients can buy generic medicines). */
+function useKendras(show: boolean, districtIds: string[]) {
+  const [rows, setRows] = useState<Kendra[]>([])
+  const key = districtIds.join(",")
+  useEffect(() => {
+    if (!show || !districtIds.length) return
+    let live = true
+    createClient()
+      .from("jan_aushadhi_kendras")
+      .select("id, name, address, lat, lng, district_id")
+      .in("district_id", districtIds)
+      .then(({ data }) => live && setRows(data ?? []))
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, key])
+  return show ? rows : []
 }
 
 function arrowIcon(color: string, angle: number) {
@@ -86,14 +128,17 @@ export default function FacilityMapInner({
   transfers = [],
   linkTo,
   height,
+  showKendras = false,
 }: {
   facilities: MapFacility[]
   transfers?: MapTransfer[]
   linkTo?: "facility" | "district"
   height: number
+  showKendras?: boolean
 }) {
   const points = facilities.map((f) => [f.lat, f.lng] as [number, number])
   const { districts, states } = useBoundaries([...new Set(facilities.map((f) => f.districtName))])
+  const kendras = useKendras(showKendras, [...new Set(facilities.map((f) => f.districtId))])
   return (
     <MapContainer
       center={[24.6, 73.8]}
@@ -174,13 +219,23 @@ export default function FacilityMapInner({
             <div style={{ minWidth: 180, fontFamily: "inherit" }}>
               <div style={{ fontWeight: 600, fontSize: 13 }}>{f.name}</div>
               <div style={{ color: "#64748B", fontSize: 11, marginBottom: 6 }}>
-                {f.type === "warehouse" ? "District warehouse" : "Primary health centre"} · {f.districtName}
+                {FACILITY_TYPE_LABEL[f.type]}
+                {f.type === "phc" ? (f.phc24x7 ? " (24×7)" : " (day)") : ""} · {f.districtName}
+                {f.laqshya ? " · LaQshya" : ""}
               </div>
               <div style={{ fontSize: 12, lineHeight: 1.6 }}>
                 <span style={{ color: "#DC2626", fontWeight: 600 }}>{formatNumber(f.critical)} critical</span> ·{" "}
                 <span style={{ color: "#D97706", fontWeight: 600 }}>{formatNumber(f.low)} low</span>
                 <br />
                 {formatNumber(f.openAlerts)} open alerts
+                {f.criticalBedsTotal ? (
+                  <>
+                    <br />
+                    <span style={f.criticalBedsOccupied! >= f.criticalBedsTotal ? { color: "#DC2626", fontWeight: 700 } : undefined}>
+                      ICU/HDU/NICU {f.criticalBedsOccupied}/{f.criticalBedsTotal} occupied
+                    </span>
+                  </>
+                ) : null}
                 {(f.openSurges ?? 0) > 0 ? (
                   <>
                     <br />
@@ -196,15 +251,25 @@ export default function FacilityMapInner({
             </div>
           </Popup>
         )
-        return f.type === "warehouse" ? (
-          <Marker key={f.id} position={[f.lat, f.lng]} icon={warehouseIcon(color)} title={f.name}>
-            {popup}
-          </Marker>
-        ) : (
+        if (f.type === "warehouse" || f.type === "chc" || f.type === "dh") {
+          return (
+            <Marker
+              key={f.id}
+              position={[f.lat, f.lng]}
+              icon={f.type === "warehouse" ? warehouseIcon(color) : hospitalIcon(color, f.type === "dh")}
+              title={f.name}
+              zIndexOffset={f.type === "dh" ? 500 : 0}
+            >
+              {popup}
+            </Marker>
+          )
+        }
+        return (
           <CircleMarker
             key={f.id}
             center={[f.lat, f.lng]}
-            radius={f.status === "critical" ? 9 : 7}
+            // sub-centres are small dots; PHCs bigger, critical ones biggest
+            radius={f.type === "shc" ? 4.5 : f.status === "critical" ? 9 : 7}
             pathOptions={{ color: "#fff", weight: 2, fillColor: color, fillOpacity: 0.95 }}
           >
             <Tooltip direction="top" offset={[0, -6]}>
@@ -214,6 +279,17 @@ export default function FacilityMapInner({
           </CircleMarker>
         )
       })}
+      {kendras.map((k) => (
+        <Marker key={k.id} position={[k.lat, k.lng]} icon={kendraIcon} title={k.name}>
+          <Popup>
+            <div style={{ minWidth: 160, fontFamily: "inherit" }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{k.name}</div>
+              <div style={{ color: "#64748B", fontSize: 11 }}>Pradhan Mantri Bhartiya Janaushadhi Kendra</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Patients can buy generic medicines here. Not part of the government stock chain.</div>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
     </MapContainer>
   )
 }

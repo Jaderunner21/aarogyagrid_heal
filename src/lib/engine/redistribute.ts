@@ -11,7 +11,7 @@ export type PlanSettings = {
 export type PlanFacility = {
   id: string
   name: string
-  type: "phc" | "chc" | "warehouse"
+  type: "phc" | "chc" | "warehouse" | "shc" | "dh"
   districtId: string
   lat: number
   lng: number
@@ -27,6 +27,8 @@ export type PairFact = {
   daysLeft: number | null
   /** demand surge in progress at this facility for this medicine */
   surge?: boolean
+  /** priority item here (e.g. a maternal medicine at a LaQshya-certified labour room): planned first, marked urgent */
+  priority?: boolean
 }
 
 export type Receiver = PairFact & { alertId: string }
@@ -130,7 +132,8 @@ export function planRedistribution({
       .filter((d) => d.medicineId === medicineId && d.spare >= settings.minTransferQty && d.facilityId !== target.id)
       .filter((d) => !receiverIds.has(key(d.facilityId, d.medicineId)))
       .map((d) => ({ d, f: fac.get(d.facilityId)! }))
-      .filter(({ f }) => f && f.type !== "warehouse" && (f.districtId === target.districtId) === sameDistrict)
+      // sub-centres hold a few days of stock for their own villages: never donors
+      .filter(({ f }) => f && f.type !== "warehouse" && f.type !== "shc" && (f.districtId === target.districtId) === sameDistrict)
       .map(({ d, f }) => ({ d, f, km: haversineKm(f, target) }))
       .filter((x) => x.km <= settings.maxDistanceKm)
       .sort((a, b) => a.km - b.km)
@@ -154,7 +157,7 @@ export function planRedistribution({
       qty,
       distanceKm: r1(donor.km),
       isCrossDistrict: cross,
-      priority: r.surge || (r.daysLeft !== null && r.daysLeft < target.resupplyDays) ? 1 : 2,
+      priority: r.surge || r.priority || (r.daysLeft !== null && r.daysLeft < target.resupplyDays) ? 1 : 2,
       alertId: r.alertId,
       reason: `${target.name} has ${fmtDays(r.daysLeft)} days of stock (${Math.round(r.stock)} at ${r1(r.pdu ?? 0)}/day) against a ${target.resupplyDays}-day resupply; ${donor.f.name} can spare ${qty} and still keep ${fmtDays(donorAfter)} days. ${alternatives.join(" ")} Distance ${r1(donor.km)} km.`.replace(/\s+/g, " "),
       facts: {
@@ -171,10 +174,15 @@ export function planRedistribution({
 
   const unmet: { r: Receiver; target: PlanFacility; remaining: number; need: number; alternatives: string[] }[] = []
 
-  // surging medicines first, then most urgent
+  // surging medicines first, then priority items, then most urgent
   const sorted = [...receivers]
     .filter((r) => !blockedMedicines.has(r.medicineId))
-    .sort((a, b) => Number(Boolean(b.surge)) - Number(Boolean(a.surge)) || (a.daysLeft ?? 999) - (b.daysLeft ?? 999))
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.surge)) - Number(Boolean(a.surge)) ||
+        Number(Boolean(b.priority)) - Number(Boolean(a.priority)) ||
+        (a.daysLeft ?? 999) - (b.daysLeft ?? 999),
+    )
   for (const r of sorted) {
     const target = fac.get(r.facilityId)
     if (!target || target.type === "warehouse" || r.pdu === null) continue
@@ -182,11 +190,13 @@ export function planRedistribution({
     if (need <= 0) continue
     const alternatives: string[] = []
 
-    // 1. Normal channel: indent to the district warehouse, when there's time and stock.
+    // 1. Normal channel: indent to the supplier (district warehouse; for a sub-centre, its PHC), when there's time and stock.
     const whId = target.supplyingWarehouse
     const wh = whId ? spare.get(key(whId, r.medicineId)) : undefined
+    const supplier = whId ? fac.get(whId) : undefined
+    const supplierName = supplier ? (supplier.type === "warehouse" ? "the district warehouse" : supplier.name) : "the supplier"
     const hasTime = !r.surge && r.daysLeft !== null && r.daysLeft >= target.resupplyDays
-    if (whId && hasTime && wh && wh.spare >= need) {
+    if (whId && (hasTime || target.type === "shc") && wh && wh.spare >= need) {
       wh.spare -= need
       proposals.push({
         kind: "indent",
@@ -195,12 +205,21 @@ export function planRedistribution({
         warehouseId: whId,
         qty: need,
         alertId: r.alertId,
-        reason: `${fmtDays(r.daysLeft)} days of stock left (${Math.round(r.stock)} at ${r1(r.pdu)}/day), enough time for the normal ${target.resupplyDays}-day resupply; the district warehouse has ${wh.spare + need} spare. Request ${need} for ${settings.targetCoverDays} days of cover.`,
+        reason: hasTime
+          ? `${fmtDays(r.daysLeft)} days of stock left (${Math.round(r.stock)} at ${r1(r.pdu)}/day), enough time for the normal ${target.resupplyDays}-day resupply; ${supplierName} has ${wh.spare + need} spare. Request ${need} for ${settings.targetCoverDays} days of cover.`
+          : `Urgent: ${fmtDays(r.daysLeft)} days of stock left (${Math.round(r.stock)} at ${r1(r.pdu)}/day). ${supplierName} has ${wh.spare + need} spare: send ${need} now for ${settings.targetCoverDays} days of cover.`,
         facts: { receiverStock: r.stock, receiverPdu: r.pdu, receiverDaysLeft: r.daysLeft, need, donorStock: wh.stock, alternatives: [] },
       })
       continue
     }
-    alternatives.push(r.surge ? "Demand is surging, so the normal indent cycle is too slow." : !hasTime ? "Too urgent to wait for the warehouse." : "The district warehouse is short.")
+    alternatives.push(
+      r.surge ? "Demand is surging, so the normal indent cycle is too slow." : !hasTime ? "Too urgent to wait for the warehouse." : `${supplierName[0].toUpperCase()}${supplierName.slice(1)} is short.`,
+    )
+    // a sub-centre is only ever supplied by its PHC: escalate through the indent below, no transfers
+    if (target.type === "shc") {
+      unmet.push({ r, target, remaining: need, need, alternatives: [...alternatives, `${supplierName} cannot cover it yet.`] })
+      continue
+    }
 
     // 2. Nearest PHC donors in the same district (split across up to 2).
     let remaining = need
@@ -225,7 +244,7 @@ export function planRedistribution({
 
   for (const u of unmet) {
     // 3. State-level pass: nearest cross-district donor within range.
-    if (crossDistrict) {
+    if (crossDistrict && u.target.type !== "shc") {
       const donor = donorsFor(u.r.medicineId, u.target, false)[0]
       if (donor) {
         const qty = Math.min(u.remaining, donor.d.spare)
@@ -249,8 +268,12 @@ export function planRedistribution({
         qty: u.remaining,
         alertId: u.r.alertId,
         reason: whHas
-          ? `Urgent indent: ${situation} No PHC within ${settings.maxDistanceKm} km can spare enough, so dispatch from the district warehouse (${wh!.spare + u.remaining} spare) without waiting for the normal cycle.`
-          : `Warehouse short — escalate to state. ${situation}`,
+          ? u.target.type === "shc"
+            ? `Urgent indent: ${situation} Dispatch from ${fac.get(u.target.supplyingWarehouse)?.name ?? "the PHC"} (${wh!.spare + u.remaining} spare).`
+            : `Urgent indent: ${situation} No PHC within ${settings.maxDistanceKm} km can spare enough, so dispatch from the district warehouse (${wh!.spare + u.remaining} spare) without waiting for the normal cycle.`
+          : u.target.type === "shc"
+            ? `${fac.get(u.target.supplyingWarehouse)?.name ?? "The PHC"} is short too — it needs its own resupply first. ${situation}`
+            : `Warehouse short — escalate to state. ${situation}`,
         facts: {
           receiverStock: u.r.stock,
           receiverPdu: u.r.pdu ?? 0,
@@ -306,7 +329,8 @@ export function planNearExpiry({
     if (b.daysToExpiry < 7 || b.daysToExpiry > 90 || blockedMedicines.has(b.medicineId)) continue
     const holder = fac.get(b.facilityId)
     const hp = byKey.get(key(b.facilityId, b.medicineId))
-    if (!holder || !hp || hp.pdu === null) continue
+    // sub-centres never send stock sideways; their PHC handles returns
+    if (!holder || holder.type === "shc" || !hp || hp.pdu === null) continue
     // the holder uses other (earlier) stock first too, so what it can use of this batch is bounded by its own pace
     const usable = Math.floor(hp.pdu * b.daysToExpiry)
     let excess = Math.min(b.qty, Math.floor(hp.stock - usable))
@@ -315,7 +339,7 @@ export function planNearExpiry({
     const candidates = pairs
       .filter((p) => p.medicineId === b.medicineId && p.facilityId !== b.facilityId && p.pdu !== null && p.pdu > 0)
       .map((p) => ({ p, f: fac.get(p.facilityId)! }))
-      .filter(({ f }) => f && f.type !== "warehouse" && f.districtId === holder.districtId)
+      .filter(({ f }) => f && f.type !== "warehouse" && f.type !== "shc" && f.districtId === holder.districtId)
       .map(({ p, f }) => {
         const k = key(p.facilityId, p.medicineId)
         // what it can consume before the expiry date on top of stock it already has or is receiving

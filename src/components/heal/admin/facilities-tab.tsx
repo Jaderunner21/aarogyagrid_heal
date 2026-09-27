@@ -15,7 +15,8 @@ import { ConfirmDialog } from "@/components/heal/admin/confirm-dialog"
 import { createClient } from "@/lib/supabase/client"
 import { runRpc } from "@/lib/client-actions"
 import { formatDate } from "@/lib/format"
-import type { Enums } from "@/lib/database.types"
+import type { BedType, Enums, Json } from "@/lib/database.types"
+import { BED_TYPE_LABEL, FACILITY_TYPE_SHORT, TIER_BED_TYPES, TIER_LABEL, tierOf } from "@/lib/facility-types"
 
 export type AdminFacility = {
   id: string
@@ -34,7 +35,13 @@ export type AdminFacility = {
   supplyingWarehouseName: string | null
   isActive: boolean
   openedOn: string | null
+  phc24x7: boolean
+  hfrId: string | null
+  hfrExtensions: Json
+  beds: Partial<Record<BedType, number>>
 }
+
+const hasLaqshya = (ext: Json) => Boolean(ext && typeof ext === "object" && !Array.isArray(ext) && "laqshya" in ext)
 
 type District = { id: string; name: string; code: string; stateId: string; stateName: string }
 type Props = {
@@ -45,10 +52,11 @@ type Props = {
   pendingBeds: { facility_id: string; total_beds: number; effective_from: string }[]
 }
 
-const TYPE_LABEL: Record<string, string> = { phc: "PHC", chc: "CHC", warehouse: "Warehouse" }
+const TYPE_LABEL: Record<string, string> = FACILITY_TYPE_SHORT
 
 export function FacilitiesTab({ isNational, districts, facilities, pendingBeds }: Props) {
-  const warehouses = facilities.filter((f) => f.type === "warehouse" && f.isActive)
+  // possible suppliers: warehouses (for everyone) and PHCs / CHCs (for sub-centres)
+  const suppliers = facilities.filter((f) => (f.type === "warehouse" || f.type === "phc" || f.type === "chc") && f.isActive)
   const pending = new Map(pendingBeds.map((p) => [p.facility_id, p]))
 
   const columns: Column<AdminFacility>[] = [
@@ -62,11 +70,24 @@ export function FacilitiesTab({ isNational, districts, facilities, pendingBeds }
             {f.type === "warehouse" ? <Warehouse className="text-muted-foreground size-4" aria-hidden="true" /> : null}
             {f.name}
           </p>
-          <p className="text-muted-foreground text-xs">{f.code}</p>
+          <p className="text-muted-foreground text-xs">
+            {f.code}
+            {f.hfrId ? ` · HFR ${f.hfrId}` : ""}
+          </p>
         </div>
       ),
     },
-    { key: "type", header: "Type", text: (f) => TYPE_LABEL[f.type], cell: (f) => TYPE_LABEL[f.type] },
+    {
+      key: "type",
+      header: "Tier",
+      text: (f) => TIER_LABEL[tierOf(f.type, f.phc24x7)],
+      cell: (f) => (
+        <span>
+          {TIER_LABEL[tierOf(f.type, f.phc24x7)]}
+          {hasLaqshya(f.hfrExtensions) ? <span className="block text-[11px] text-pink-700">LaQshya</span> : null}
+        </span>
+      ),
+    },
     {
       key: "district",
       header: isNational ? "District · State" : "District",
@@ -80,7 +101,14 @@ export function FacilitiesTab({ isNational, districts, facilities, pendingBeds }
       className: "text-right",
       cell: (f) => (
         <span>
-          {f.type === "warehouse" ? "—" : f.totalBeds}
+          {f.type === "warehouse" || f.type === "shc" ? "—" : f.totalBeds}
+          {Object.keys(f.beds).length ? (
+            <span className="text-muted-foreground block text-[11px]">
+              {Object.entries(f.beds)
+                .map(([t, n]) => `${BED_TYPE_LABEL[t as BedType]} ${n}`)
+                .join(" · ")}
+            </span>
+          ) : null}
           {pending.get(f.id) ? (
             <span className="text-muted-foreground block text-[11px]">
               → {pending.get(f.id)!.total_beds} from {formatDate(pending.get(f.id)!.effective_from)}
@@ -112,8 +140,8 @@ export function FacilitiesTab({ isNational, districts, facilities, pendingBeds }
       className: "text-right",
       cell: (f) => (
         <div className="flex justify-end gap-1">
-          <FacilityDialog districts={districts} warehouses={warehouses} facility={f} />
-          {f.type !== "warehouse" && f.isActive ? <BedsDialog facility={f} /> : null}
+          <FacilityDialog districts={districts} suppliers={suppliers} facility={f} />
+          {f.type !== "warehouse" && f.type !== "shc" && f.isActive ? <BedsDialog facility={f} /> : null}
           <ActiveToggle facility={f} />
         </div>
       ),
@@ -144,7 +172,7 @@ export function FacilitiesTab({ isNational, districts, facilities, pendingBeds }
       actions={
         <>
           <ImportDialog />
-          <FacilityDialog districts={districts} warehouses={warehouses} />
+          <FacilityDialog districts={districts} suppliers={suppliers} />
         </>
       }
     />
@@ -154,11 +182,11 @@ export function FacilitiesTab({ isNational, districts, facilities, pendingBeds }
 // ---------------------------------------------------------------- add / edit
 function FacilityDialog({
   districts,
-  warehouses,
+  suppliers,
   facility,
 }: {
   districts: District[]
-  warehouses: AdminFacility[]
+  suppliers: AdminFacility[]
   facility?: AdminFacility
 }) {
   const router = useRouter()
@@ -175,10 +203,22 @@ function FacilityDialog({
     totalBeds: facility ? String(facility.totalBeds) : "6",
     resupplyDays: facility ? String(facility.resupplyDays) : "7",
     warehouse: facility?.supplyingWarehouse ?? "",
+    hfrId: facility?.hfrId ?? "",
   }))
+  const [is24x7, setIs24x7] = useState(facility?.phc24x7 ?? false)
+  const [laqshya, setLaqshya] = useState(facility ? hasLaqshya(facility.hfrExtensions) : false)
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
   const stateOf = (districtId: string) => districts.find((d) => d.id === districtId)?.stateId
-  const whOptions = useMemo(() => warehouses.filter((w) => stateOf(w.districtId) === stateOf(form.districtId)), [warehouses, form.districtId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // a sub-centre is supplied by a PHC or CHC in its district; everything else by a warehouse in the state
+  const whOptions = useMemo(
+    () =>
+      suppliers.filter((w) =>
+        form.type === "shc"
+          ? (w.type === "phc" || w.type === "chc") && w.districtId === form.districtId && w.id !== facility?.id
+          : w.type === "warehouse" && stateOf(w.districtId) === stateOf(form.districtId),
+      ),
+    [suppliers, form.districtId, form.type], // eslint-disable-line react-hooks/exhaustive-deps
+  )
 
   function save() {
     startTransition(async () => {
@@ -195,6 +235,16 @@ function FacilityDialog({
           p_total_beds: Number(form.totalBeds || 0),
           p_resupply_days: Number(form.resupplyDays || 7),
           p_supplying_warehouse: form.type === "warehouse" ? undefined : form.warehouse || undefined,
+          p_phc_24x7: form.type === "phc" ? is24x7 : false,
+          p_hfr_id: form.hfrId.trim(),
+          p_hfr_extensions: (() => {
+            const base = (facility?.hfrExtensions && typeof facility.hfrExtensions === "object" && !Array.isArray(facility.hfrExtensions)
+              ? { ...facility.hfrExtensions }
+              : {}) as Record<string, Json>
+            if (laqshya && !("laqshya" in base)) base.laqshya = { labour_room: true, since: new Date().toISOString().slice(0, 10) }
+            if (!laqshya) delete base.laqshya
+            return base
+          })(),
         }),
         facility ? "Facility updated." : "Facility added with an empty stock line for every medicine it holds.",
       )
@@ -266,7 +316,13 @@ function FacilityDialog({
           <Field label="Longitude" id="f-lng">
             <Input id="f-lng" inputMode="decimal" value={form.lng} onChange={(e) => set("lng", e.target.value)} />
           </Field>
-          {!facility && form.type !== "warehouse" ? (
+          {form.type === "phc" ? (
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" className="accent-primary size-4" checked={is24x7} onChange={(e) => setIs24x7(e.target.checked)} />
+              Open 24×7 (delivery point: inpatient and maternity beds, 24×7-only medicines)
+            </label>
+          ) : null}
+          {!facility && form.type !== "warehouse" && form.type !== "shc" ? (
             <Field label="Total beds" id="f-beds">
               <Input id="f-beds" type="number" min={0} value={form.totalBeds} onChange={(e) => set("totalBeds", e.target.value)} />
             </Field>
@@ -275,10 +331,10 @@ function FacilityDialog({
             <Input id="f-resupply" type="number" min={1} value={form.resupplyDays} onChange={(e) => set("resupplyDays", e.target.value)} />
           </Field>
           {form.type !== "warehouse" ? (
-            <Field label="Supplying warehouse" id="f-wh" wide>
+            <Field label={form.type === "shc" ? "Supplied by (PHC or CHC)" : "Supplying warehouse"} id="f-wh" wide>
               <Select value={form.warehouse} onValueChange={(v) => set("warehouse", v)}>
                 <SelectTrigger id="f-wh" className="w-full">
-                  <SelectValue placeholder="Choose warehouse" />
+                  <SelectValue placeholder={form.type === "shc" ? "Choose PHC or CHC" : "Choose warehouse"} />
                 </SelectTrigger>
                 <SelectContent>
                   {whOptions.map((w) => (
@@ -290,9 +346,18 @@ function FacilityDialog({
               </Select>
             </Field>
           ) : null}
-          <Field label="Address (optional)" id="f-address" wide>
+          <Field label="HFR ID (Health Facility Registry)" id="f-hfr">
+            <Input id="f-hfr" value={form.hfrId} onChange={(e) => set("hfrId", e.target.value)} placeholder="IN0810001234" />
+          </Field>
+          <Field label="Address (optional)" id="f-address">
             <Input id="f-address" value={form.address} onChange={(e) => set("address", e.target.value)} />
           </Field>
+          {form.type !== "warehouse" && form.type !== "shc" ? (
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" className="accent-primary size-4" checked={laqshya} onChange={(e) => setLaqshya(e.target.checked)} />
+              LaQshya certified labour room (maternal medicines get priority here)
+            </label>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
@@ -317,13 +382,16 @@ function Field({ label, id, wide, children }: { label: string; id: string; wide?
   )
 }
 
-// ---------------------------------------------------------------- beds with an effective date
+// ---------------------------------------------------------------- beds by type (limited by the facility's tier)
 function BedsDialog({ facility }: { facility: AdminFacility }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [beds, setBeds] = useState(String(facility.totalBeds))
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const allowed = TIER_BED_TYPES[tierOf(facility.type, facility.phc24x7)]
+  const [beds, setBeds] = useState<Record<string, string>>(() =>
+    Object.fromEntries(allowed.map((t) => [t, String(facility.beds[t] ?? 0)])),
+  )
   const [pending, startTransition] = useTransition()
+  const total = allowed.reduce((sum, t) => sum + Number(beds[t] || 0), 0)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -333,28 +401,33 @@ function BedsDialog({ facility }: { facility: AdminFacility }) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Change beds · {facility.name}</DialogTitle>
-          <DialogDescription>Now {facility.totalBeds} beds. A future date is applied automatically on that day.</DialogDescription>
+          <DialogTitle>Beds by type · {facility.name}</DialogTitle>
+          <DialogDescription>
+            A {TIER_LABEL[tierOf(facility.type, facility.phc24x7)]} can have these bed types (IPHS tier). Total beds are their sum.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Total beds" id="b-beds">
-            <Input id="b-beds" type="number" min={0} value={beds} onChange={(e) => setBeds(e.target.value)} />
-          </Field>
-          <Field label="Effective from" id="b-date">
-            <Input id="b-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
+          {allowed.map((t) => (
+            <Field key={t} label={BED_TYPE_LABEL[t]} id={`b-${t}`}>
+              <Input id={`b-${t}`} type="number" min={0} value={beds[t] ?? "0"} onChange={(e) => setBeds((b) => ({ ...b, [t]: e.target.value }))} />
+            </Field>
+          ))}
         </div>
+        <p className="text-muted-foreground text-sm">Total: {total} beds</p>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
           <Button
-            disabled={pending || beds === ""}
+            disabled={pending}
             onClick={() =>
               startTransition(async () => {
                 const ok = await runRpc(
-                  createClient().rpc("admin_change_beds", { p_id: facility.id, p_total_beds: Number(beds), p_effective: date }),
-                  "Bed change recorded.",
+                  createClient().rpc("admin_set_facility_beds", {
+                    p_id: facility.id,
+                    p_beds: Object.fromEntries(allowed.map((t) => [t, Number(beds[t] || 0)])),
+                  }),
+                  "Beds updated.",
                 )
                 if (ok) {
                   setOpen(false)
@@ -404,7 +477,7 @@ function ActiveToggle({ facility }: { facility: AdminFacility }) {
 }
 
 // ---------------------------------------------------------------- CSV import
-const CSV_HEADERS = ["district_code", "type", "name", "code", "lat", "lng", "address", "total_beds", "resupply_days", "supplying_warehouse_code"]
+const CSV_HEADERS = ["district_code", "type", "name", "code", "lat", "lng", "address", "total_beds", "resupply_days", "supplying_warehouse_code", "phc_24x7", "hfr_id"]
 
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = []
@@ -445,7 +518,8 @@ function ImportDialog() {
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const template = `data:text/csv;charset=utf-8,${encodeURIComponent(
-    CSV_HEADERS.join(",") + "\nRJ-UDR,phc,PHC Salumber,PHC-UDR-09,24.13,74.05,Salumber,6,7,WH-UDR\n",
+    CSV_HEADERS.join(",") +
+      "\nRJ-UDR,phc,PHC Salumber,PHC-UDR-09,24.13,74.05,Salumber,6,7,WH-UDR,yes,\nRJ-UDR,shc,SHC Jaisamand,SHC-UDR-01,24.26,73.95,Jaisamand,0,7,PHC-UDR-09,,\n",
   )}`
 
   async function onFile(file: File | undefined) {

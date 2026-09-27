@@ -33,12 +33,15 @@ export function transferActions(t: TransferView, v: Viewer): TransferAction[] {
 
 export function indentActions(i: IndentView, v: Viewer): IndentAction[] {
   const out: IndentAction[] = []
-  const officer = v.role === "district_officer" && v.districtId === i.districtId && !i.awaitingMo
+  // the district officer, or for a sub-centre, the medical officer of the PHC that supplies it
+  const supplierDoctor = v.role === "phc_staff" && v.phcPosition === "medical_officer" && v.facilityId === i.warehouseId
+  const officer = (v.role === "district_officer" && v.districtId === i.districtId) || supplierDoctor
   const doctorHere = v.role === "phc_staff" && v.phcPosition === "medical_officer" && v.facilityId === i.facilityId
   if (i.status === "submitted" && i.awaitingMo && doctorHere) out.push("sign_off")
-  if (i.status === "submitted" && officer) out.push("approve")
-  if ((i.status === "submitted" || i.status === "approved") && officer) out.push("reject")
-  if (i.status === "approved" && v.role === "warehouse_manager" && v.facilityId === i.warehouseId) out.push("dispatch")
+  if (i.status === "submitted" && officer && !i.awaitingMo) out.push("approve")
+  if ((i.status === "submitted" || i.status === "approved") && officer && !i.awaitingMo) out.push("reject")
+  // the supplier dispatches: the warehouse, or the PHC for its sub-centres
+  if (i.status === "approved" && (v.role === "warehouse_manager" || v.role === "phc_staff") && v.facilityId === i.warehouseId) out.push("dispatch")
   if (i.status === "dispatched" && v.role === "phc_staff" && v.facilityId === i.facilityId) out.push("receive")
   return out
 }

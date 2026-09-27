@@ -1,7 +1,8 @@
 // Database setup over SUPABASE_DB_URL: the base schema and seed (db/base) plus the upgrades (db/migrations, db/seed).
 //   npm run db:setup  -> 01_schema.sql (skipped if tables exist) + 02_seed.sql (skipped if already seeded)
 //                        + db/migrations/002_upgrade.sql (safe to re-run) + db/seed/002_upgrade_seed.sql (skipped if Gujarat exists)
-//                        + db/migrations/003_phc_doctors.sql + 004_state_medicines.sql (safe to re-run)
+//                        + db/migrations/003_phc_doctors.sql + 004_state_medicines.sql + 005_hierarchy_items_beds.sql + 006_faster_engine_series.sql (safe to re-run)
+//                        + db/seed/005_expansion_seed.sql (skipped if sub-centres exist)
 //   npm run db:reset  -> 03_reset.sql + 01_schema.sql + 02_seed.sql + 002 upgrade + demo users   (wipes all app data)
 //   npm run db:types  -> regenerate src/lib/database.types.ts from the live project
 import { execSync } from "node:child_process"
@@ -81,6 +82,11 @@ async function upgrade(client: Client) {
   else await run(client, "db/seed/002_upgrade_seed.sql")
   await run(client, "db/migrations/003_phc_doctors.sql")
   await run(client, "db/migrations/004_state_medicines.sql")
+  await run(client, "db/migrations/005_hierarchy_items_beds.sql")
+  const shc = await client.query<{ n: string }>("select count(*)::text as n from facilities where type::text = 'shc'")
+  if (Number(shc.rows[0]?.n ?? 0) > 0) console.log("  Sub-centres already seeded, skipping 005_expansion_seed.sql")
+  else await run(client, "db/seed/005_expansion_seed.sql")
+  await run(client, "db/migrations/006_faster_engine_series.sql")
 }
 
 async function reset(client: Client) {

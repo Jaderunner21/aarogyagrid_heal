@@ -2,7 +2,7 @@
 // Every read goes through the caller's RLS.
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { subDays, format } from "date-fns"
-import type { Database, Enums, Json, Tables, Views } from "@/lib/database.types"
+import type { Database, Enums, ItemType, Json, Tables, Tier, Views } from "@/lib/database.types"
 import { toStatus, type StockStatus } from "@/lib/status"
 
 export type DB = SupabaseClient<Database>
@@ -40,6 +40,9 @@ export type StockRow = {
   seasonalitySource: string | null
   footfallWeight: number | null
   surge: boolean
+  itemType: ItemType
+  program: string | null
+  tier: Tier
 }
 
 export function toStockRow(r: Views<"v_stock_status">): StockRow {
@@ -72,6 +75,9 @@ export function toStockRow(r: Views<"v_stock_status">): StockRow {
     seasonalitySource: r.seasonality_source,
     footfallWeight: n(r.footfall_weight),
     surge: Boolean(r.surge),
+    itemType: r.item_type ?? "medicine",
+    program: r.program ?? null,
+    tier: r.tier ?? "phc_day",
   }
 }
 
@@ -130,7 +136,17 @@ export type FacilitySummary = {
   attendance7d: number | null
   status: StockStatus
   openSurges: number
+  tier: Tier
+  phc24x7: boolean
+  hfrId: string | null
+  laqshya: boolean
+  supplierId: string | null
+  criticalBedsTotal: number
+  criticalBedsOccupied: number
 }
+
+const hasLaqshya = (ext: Json | null | undefined) =>
+  Boolean(ext && typeof ext === "object" && !Array.isArray(ext) && "laqshya" in ext)
 
 export async function getFacilitySummaries(
   db: DB,
@@ -163,7 +179,30 @@ export async function getFacilitySummaries(
     attendance7d: n(r.attendance_rate_7d),
     status: toStatus(r.overall_status),
     openSurges: num(r.open_surges),
+    tier: r.tier ?? "phc_day",
+    phc24x7: Boolean(r.phc_24x7),
+    hfrId: r.hfr_id ?? null,
+    laqshya: hasLaqshya(r.hfr_extensions),
+    supplierId: r.supplying_warehouse ?? null,
+    criticalBedsTotal: num(r.critical_beds_total),
+    criticalBedsOccupied: num(r.critical_beds_occupied),
   }))
+}
+
+// ---------------------------------------------------------------- beds by type
+export type BedsByType = { bedType: Tables<"facility_beds">["bed_type"]; total: number; occupied: number | null }
+
+/** A facility's beds by type with the latest reported occupancy of each. */
+export async function getBedsByType(db: DB, facilityId: string): Promise<BedsByType[]> {
+  const [beds, occ] = await Promise.all([
+    db.from("facility_beds").select("bed_type, total").eq("facility_id", facilityId),
+    db.from("daily_bed_occupancy").select("bed_type, occupied, report_date").eq("facility_id", facilityId)
+      .gte("report_date", format(subDays(new Date(), 7), "yyyy-MM-dd")).order("report_date", { ascending: false }),
+  ])
+  const order = ["icu", "hdu", "nicu", "general", "maternity", "paediatric", "isolation", "observation"]
+  return (beds.data ?? [])
+    .map((b) => ({ bedType: b.bed_type, total: b.total, occupied: (occ.data ?? []).find((o) => o.bed_type === b.bed_type)?.occupied ?? null }))
+    .sort((a, b) => order.indexOf(a.bedType) - order.indexOf(b.bedType))
 }
 
 export type DistrictSummary = {
@@ -501,8 +540,9 @@ export type ForecastDetail = {
   forecast: Tables<"forecasts"> | null
   series: SeriesPoint[] | null
   history: { date: string; used: number; received: number; out: number }[]
-  /** daily patient footfall (PHCs), same dates as history */
+  /** the demand driver per day: patient footfall, or occupied (critical-care) beds for oxygen */
   footfall: { date: string; footfall: number }[]
+  driver: "patients" | "beds"
   log: Tables<"stock_log">[]
   alert: Tables<"alerts"> | null
 }
@@ -531,8 +571,23 @@ export async function getForecastDetail(db: DB, facilityId: string, medicineId: 
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    db.from("daily_reports").select("report_date, footfall").eq("facility_id", facilityId).gte("report_date", since).order("report_date"),
+    db.from("daily_reports").select("report_date, footfall, occupied_beds").eq("facility_id", facilityId).gte("report_date", since).order("report_date"),
   ])
+  const oxygen = stock.data?.item_type === "oxygen"
+  let driverRows = (reports.data ?? []).map((r) => ({ date: r.report_date, footfall: oxygen ? r.occupied_beds : r.footfall }))
+  if (oxygen) {
+    const { data: crit } = await db
+      .from("daily_bed_occupancy")
+      .select("report_date, occupied")
+      .eq("facility_id", facilityId)
+      .in("bed_type", ["icu", "hdu", "nicu"])
+      .gte("report_date", since)
+    if (crit?.length) {
+      const byDate = new Map<string, number>()
+      for (const c of crit) byDate.set(c.report_date, (byDate.get(c.report_date) ?? 0) + c.occupied)
+      driverRows = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, footfall]) => ({ date, footfall }))
+    }
+  }
 
   const byDay = new Map<string, { used: number; received: number; out: number }>()
   for (const l of log.data ?? []) {
@@ -555,7 +610,8 @@ export async function getForecastDetail(db: DB, facilityId: string, medicineId: 
     forecast: forecast.data ?? null,
     series: parseSeries(forecast.data?.series ?? null),
     history,
-    footfall: (reports.data ?? []).map((r) => ({ date: r.report_date, footfall: r.footfall })),
+    footfall: driverRows,
+    driver: oxygen ? "beds" : "patients",
     log: (log.data ?? []).filter((l) => l.log_date >= format(subDays(new Date(), 30), "yyyy-MM-dd")),
     alert: alert.data ?? null,
   }

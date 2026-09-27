@@ -81,6 +81,11 @@ type AlertRow = {
   facts: Json | null
 }
 
+export type ItemType = "medicine" | "oxygen" | "consumable" | "vaccine" | "diagnostic"
+export type Tier = "shc" | "phc_day" | "phc_24x7" | "chc" | "dh" | "warehouse"
+export type BedType = "general" | "maternity" | "paediatric" | "icu" | "hdu" | "nicu" | "isolation" | "observation"
+export type AttendanceStatus = "present_on_duty" | "absent" | "on_leave" | "on_deputation"
+
 type ProfileRow = {
   id: string
   full_name: string
@@ -95,6 +100,7 @@ type ProfileRow = {
   deactivated_at: string | null
   email: string | null
   phc_position: "staff" | "medical_officer"
+  hpr_id: string | null
 }
 
 type MedicineRequestRow = {
@@ -156,6 +162,9 @@ export type Database = {
           is_active: boolean
           created_at: string
           opened_on: string | null
+          phc_24x7: boolean
+          hfr_id: string | null
+          hfr_extensions: Json
         }
         Insert: {
           id?: string
@@ -172,6 +181,9 @@ export type Database = {
           supplying_warehouse?: string | null
           is_active?: boolean
           created_at?: string
+          phc_24x7?: boolean
+          hfr_id?: string | null
+          hfr_extensions?: Json
         }
         Update: Partial<Database["public"]["Tables"]["facilities"]["Insert"]>
         Relationships: []
@@ -213,6 +225,10 @@ export type Database = {
           stocked_at: Database["public"]["Enums"]["facility_type"][]
           /** null = national list; otherwise that state's own list */
           state_id: string | null
+          item_type: ItemType
+          phc_24x7_only: boolean
+          program: string | null
+          gtin: string | null
         }
         Insert: {
           id?: string
@@ -229,6 +245,10 @@ export type Database = {
           status_reason?: string | null
           stocked_at?: Database["public"]["Enums"]["facility_type"][]
           state_id?: string | null
+          item_type?: ItemType
+          phc_24x7_only?: boolean
+          program?: string | null
+          gtin?: string | null
         }
         Update: Partial<Database["public"]["Tables"]["medicines"]["Insert"]>
         Relationships: []
@@ -299,12 +319,14 @@ export type Database = {
           phone: string | null
           is_active: boolean
           created_at: string
+          hpr_id: string | null
         }
         Insert: {
           id?: string
           facility_id: string
           name: string
           role: Database["public"]["Enums"]["staff_role"]
+          hpr_id?: string | null
           phone?: string | null
           is_active?: boolean
           created_at?: string
@@ -313,9 +335,9 @@ export type Database = {
         Relationships: []
       }
       attendance: {
-        Row: { staff_id: string; att_date: string; present: boolean; marked_by: string | null }
-        Insert: { staff_id: string; att_date?: string; present: boolean; marked_by?: string | null }
-        Update: { staff_id?: string; att_date?: string; present?: boolean; marked_by?: string | null }
+        Row: { staff_id: string; att_date: string; present: boolean; marked_by: string | null; status: AttendanceStatus | null }
+        Insert: { staff_id: string; att_date?: string; present: boolean; marked_by?: string | null; status?: AttendanceStatus | null }
+        Update: { staff_id?: string; att_date?: string; present?: boolean; marked_by?: string | null; status?: AttendanceStatus | null }
         Relationships: []
       }
       forecasts: {
@@ -517,6 +539,30 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["audit_log"]["Row"]>
         Relationships: []
       }
+      tier_bed_types: {
+        Row: { tier: Tier; bed_type: BedType }
+        Insert: { tier: Tier; bed_type: BedType }
+        Update: Partial<{ tier: Tier; bed_type: BedType }>
+        Relationships: []
+      }
+      facility_beds: {
+        Row: { facility_id: string; bed_type: BedType; total: number; updated_at: string }
+        Insert: { facility_id: string; bed_type: BedType; total: number; updated_at?: string }
+        Update: Partial<{ facility_id: string; bed_type: BedType; total: number; updated_at: string }>
+        Relationships: []
+      }
+      daily_bed_occupancy: {
+        Row: { facility_id: string; report_date: string; bed_type: BedType; occupied: number; created_by: string | null }
+        Insert: { facility_id: string; report_date?: string; bed_type: BedType; occupied: number; created_by?: string | null }
+        Update: Partial<{ facility_id: string; report_date: string; bed_type: BedType; occupied: number; created_by: string | null }>
+        Relationships: []
+      }
+      jan_aushadhi_kendras: {
+        Row: { id: string; district_id: string; name: string; address: string | null; lat: number; lng: number; created_at: string }
+        Insert: { id?: string; district_id: string; name: string; address?: string | null; lat: number; lng: number; created_at?: string }
+        Update: Partial<{ district_id: string; name: string; address: string | null; lat: number; lng: number }>
+        Relationships: []
+      }
       medicine_requests: {
         Row: MedicineRequestRow
         Insert: Partial<MedicineRequestRow>
@@ -609,6 +655,9 @@ export type Database = {
           seasonality_source: string
           footfall_weight: number
           surge: boolean
+          item_type: ItemType
+          program: string
+          tier: Tier
         }>
         Relationships: []
       }
@@ -636,6 +685,13 @@ export type Database = {
           attendance_rate_7d: number
           overall_status: string
           open_surges: number
+          tier: Tier
+          phc_24x7: boolean
+          hfr_id: string
+          hfr_extensions: Json
+          supplying_warehouse: string
+          critical_beds_total: number
+          critical_beds_occupied: number
         }>
         Relationships: []
       }
@@ -777,6 +833,9 @@ export type Database = {
           p_resupply_days?: number
           p_supplying_warehouse?: string
           p_opened_on?: string
+          p_phc_24x7?: boolean
+          p_hfr_id?: string
+          p_hfr_extensions?: Json
         }
         Returns: Database["public"]["Tables"]["facilities"]["Row"]
       }
@@ -800,8 +859,19 @@ export type Database = {
           p_is_chronic?: boolean
           p_stocked_at?: Database["public"]["Enums"]["facility_type"][]
           p_state?: string
+          p_item_type?: ItemType
+          p_phc_24x7_only?: boolean
+          p_program?: string
+          p_gtin?: string
         }
         Returns: Database["public"]["Tables"]["medicines"]["Row"]
+      }
+      admin_set_facility_beds: { Args: { p_id: string; p_beds: Json }; Returns: Database["public"]["Tables"]["facilities"]["Row"] }
+      admin_set_registry_ids: { Args: { p_person: string; p_hpr_id: string }; Returns: ProfileRow }
+      item_allowed: { Args: { p_facility: string; p_item: string }; Returns: boolean }
+      engine_critical_beds: {
+        Args: { p_district?: string; p_days?: number }
+        Returns: { facility_id: string; occupied: number[]; reported: boolean[] }[]
       }
       facility_has_medical_officer: { Args: { p_facility: string }; Returns: boolean }
       request_new_medicine: {
@@ -932,6 +1002,24 @@ export type Database = {
           reported: boolean[]
         }[]
       }
+      engine_series3: {
+        Args: { p_district?: string; p_days?: number }
+        Returns: {
+          facility_id: string
+          medicine_id: string
+          facility_type: Database["public"]["Enums"]["facility_type"]
+          district_id: string
+          resupply_days: number
+          stock: number
+          start_date: string
+          idx: number[]
+          used: number[]
+          received: number[]
+          outflow: number[]
+          wasted: number[]
+          reported_idx: number[]
+        }[]
+      }
       engine_footfall: {
         Args: { p_district?: string; p_days?: number }
         Returns: {
@@ -962,7 +1050,7 @@ export type Database = {
       }
     }
     Enums: {
-      facility_type: "phc" | "chc" | "warehouse"
+      facility_type: "phc" | "chc" | "warehouse" | "shc" | "dh"
       user_role: "phc_staff" | "warehouse_manager" | "district_officer" | "state_admin" | "national_admin"
       staff_role:
         | "medical_officer"

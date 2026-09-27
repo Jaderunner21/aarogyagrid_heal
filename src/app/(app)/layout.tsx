@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
 
   return (
     <AppShell
-      user={{ id: profile.id, name: profile.full_name, email: session.email, role: profile.role, phcPosition: profile.phc_position ?? "staff" }}
+      user={{ id: profile.id, name: profile.full_name, email: session.email, role: profile.role, phcPosition: profile.phc_position ?? "staff", facilityType: session.facility?.type ?? null }}
       nav={NAV[profile.role]}
       crumbs={crumbs}
       lang={lang}

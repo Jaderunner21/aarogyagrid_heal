@@ -239,10 +239,21 @@ export function RejectDialog({ item, size = "sm" }: { item: Item; size?: Size })
 }
 
 // ------------------------------------------------------------------ dispatch
-export function DispatchDialog({ item, size = "sm", lang = "en" }: { item: Item; size?: Size; lang?: Lang }) {
+export function DispatchDialog({
+  item,
+  size = "sm",
+  lang = "en",
+  fromFacility = false,
+}: {
+  item: Item
+  size?: Size
+  lang?: Lang
+  /** sent by a PHC or CHC (e.g. to its sub-centre), not a warehouse: its own staff carry it */
+  fromFacility?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [carrierType, setCarrierType] = useState<Enums<"carrier_type">>(
-    item.kind === "indent" ? "warehouse_vehicle" : (item.carrierType ?? "facility_staff"),
+    item.kind === "indent" ? (fromFacility ? "facility_staff" : "warehouse_vehicle") : (item.carrierType ?? "facility_staff"),
   )
   const [name, setName] = useState(item.carrierName ?? "")
   const { pending, run, refresh } = useAction()

@@ -84,6 +84,46 @@ export function bedAlert(facilityId: string, totalBeds: number, lastThreeOccupie
   ]
 }
 
+export const BED_TYPE_LABEL: Record<string, string> = {
+  general: "General ward",
+  maternity: "Maternity",
+  paediatric: "Paediatric",
+  icu: "ICU",
+  hdu: "HDU",
+  nicu: "NICU / SNCU",
+  isolation: "Isolation",
+  observation: "Observation",
+}
+const CRITICAL_CARE = new Set(["icu", "hdu", "nicu"])
+
+/**
+ * Beds by type: one alert listing every bed type that was 90%+ full in each of its last 3 reports.
+ * Critical when a critical-care type (ICU, HDU, NICU) was completely full all 3 days.
+ */
+export function bedTypeAlert(
+  facilityId: string,
+  types: { bedType: string; total: number; lastThree: number[] }[],
+): DesiredAlert[] {
+  const full = types.filter((t) => t.total > 0 && t.lastThree.length >= 3 && t.lastThree.every((o) => o / t.total >= 0.9))
+  if (!full.length) return []
+  const critical = full.some((t) => CRITICAL_CARE.has(t.bedType) && t.lastThree.every((o) => o >= t.total))
+  const order = (t: { bedType: string }) => (CRITICAL_CARE.has(t.bedType) ? 0 : 1)
+  const parts = [...full]
+    .sort((a, b) => order(a) - order(b))
+    .map((t) => `${BED_TYPE_LABEL[t.bedType] ?? t.bedType} ${t.lastThree.map((o) => `${o}/${t.total}`).join(", ")}`)
+  return [
+    {
+      facilityId,
+      medicineId: null,
+      type: "bed_pressure",
+      severity: critical ? "critical" : "warning",
+      daysLeft: null,
+      message: `${critical ? "Critical-care beds full. " : ""}Beds 90%+ occupied in the last 3 reports: ${parts.join("; ")}.`,
+      facts: { bedTypes: full.map((t) => ({ type: t.bedType, total: t.total, lastThree: t.lastThree })) } as unknown as Json,
+    },
+  ]
+}
+
 export const alertKey = (a: { facilityId: string; medicineId: string | null; type: string }) =>
   `${a.facilityId}:${a.medicineId ?? "-"}:${a.type}`
 

@@ -30,6 +30,7 @@ export type AdminPerson = {
   isActive: boolean
   inScope: boolean
   phcPosition: "staff" | "medical_officer"
+  hprId: string | null
 }
 
 type Position = AdminPerson["phcPosition"]
@@ -82,7 +83,10 @@ export function PeopleTab({ people, meId, ...scope }: ScopeOptions & { people: A
             {p.fullName}
             {p.id === meId ? <span className="text-muted-foreground ml-1 text-xs">(you)</span> : null}
           </p>
-          <p className="text-muted-foreground text-xs">{p.email ?? "—"}</p>
+          <p className="text-muted-foreground text-xs">
+            {p.email ?? "—"}
+            {p.hprId ? ` · HPR ${p.hprId}` : ""}
+          </p>
         </div>
       ),
     },
@@ -402,6 +406,7 @@ function EditPersonDialog({ person, ...scope }: ScopeOptions & { person: AdminPe
   const [districtId, setDistrictId] = useState(person.districtId ?? "")
   const [stateId, setStateId] = useState(person.stateId ?? "")
   const [position, setPosition] = useState<Position>(person.phcPosition)
+  const [hprId, setHprId] = useState(person.hprId ?? "")
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -423,6 +428,10 @@ function EditPersonDialog({ person, ...scope }: ScopeOptions & { person: AdminPe
           <div className="grid gap-1.5">
             <Label htmlFor="e-phone">Phone</Label>
             <Input id="e-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="e-hpr">HPR ID (Healthcare Professionals Registry, optional)</Label>
+            <Input id="e-hpr" value={hprId} onChange={(e) => setHprId(e.target.value)} placeholder="71-1234-5678-9012" />
           </div>
           <ScopeFields
             {...scope}
@@ -461,7 +470,11 @@ function EditPersonDialog({ person, ...scope }: ScopeOptions & { person: AdminPe
                   ok && role === "phc_staff" && position !== person.phcPosition
                     ? await runRpc(createClient().rpc("admin_set_phc_position", { p_id: person.id, p_position: position }), "Position updated.")
                     : ok
-                if (ok && posOk) {
+                const hprOk =
+                  ok && posOk && hprId.trim() !== (person.hprId ?? "")
+                    ? await runRpc(createClient().rpc("admin_set_registry_ids", { p_person: person.id, p_hpr_id: hprId.trim() }), "HPR ID saved.")
+                    : ok && posOk
+                if (ok && posOk && hprOk) {
                   setOpen(false)
                   router.refresh()
                 }

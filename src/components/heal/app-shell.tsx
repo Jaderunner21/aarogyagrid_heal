@@ -19,7 +19,7 @@ import { t, type Lang } from "@/lib/i18n"
 import type { NavItem, Role } from "@/lib/roles"
 import { cn } from "@/lib/utils"
 
-export type ShellUser = { id: string; name: string; email: string; role: Role; phcPosition?: PhcPosition }
+export type ShellUser = { id: string; name: string; email: string; role: Role; phcPosition?: PhcPosition; facilityType?: string | null }
 
 type Props = {
   user: ShellUser
@@ -82,7 +82,7 @@ export function AppShell({ user, nav, crumbs, lang, children }: Props) {
             <HealMark className="size-7" />
           </Link>
 
-          <ViewBadge kind={view} lang={lang} />
+          <ViewBadge kind={view} lang={lang} facilityType={user.facilityType} />
           <Breadcrumb crumbs={crumbs} />
 
           <div className="ml-auto flex items-center gap-1 sm:gap-2">

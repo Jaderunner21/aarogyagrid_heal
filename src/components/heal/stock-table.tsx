@@ -12,12 +12,16 @@ import { formatDate, formatNumber } from "@/lib/format"
 import type { StockRow } from "@/lib/queries"
 import { STATUS_META, STATUS_ORDER, urgency, type StockStatus } from "@/lib/status"
 import { cn } from "@/lib/utils"
+import { ITEM_TYPE_LABEL, ITEM_TYPES } from "@/lib/facility-types"
+import type { ItemType } from "@/lib/database.types"
 
 type SortKey = "medicine" | "category" | "quantity" | "pdu" | "days" | "stockout"
 
 export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; showFacility?: boolean }) {
   const [query, setQuery] = useState("")
   const [status, setStatus] = useState<StockStatus | "all">("all")
+  const [itemType, setItemType] = useState<ItemType | "all">("all")
+  const typesPresent = ITEM_TYPES.filter((t) => rows.some((r) => r.itemType === t))
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "days", dir: 1 })
   const [target, setTarget] = useState<DrawerTarget>(null)
 
@@ -32,6 +36,7 @@ export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; s
     const filtered = rows.filter(
       (r) =>
         (status === "all" || r.status === status) &&
+        (itemType === "all" || r.itemType === itemType) &&
         (!q ||
           r.medicineName.toLowerCase().includes(q) ||
           r.category.toLowerCase().includes(q) ||
@@ -58,7 +63,7 @@ export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; s
       const vb = val(b)
       return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir
     })
-  }, [rows, query, status, sort])
+  }, [rows, query, status, itemType, sort])
 
   function header(label: string, key: SortKey, className?: string) {
     const active = sort.key === key
@@ -107,10 +112,29 @@ export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; s
             ))}
           </SelectContent>
         </Select>
+        {typesPresent.length > 1 ? (
+          <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Item type">
+            {(["all", ...typesPresent] as const).map((tp) => (
+              <button
+                key={tp}
+                type="button"
+                role="radio"
+                aria-checked={itemType === tp}
+                onClick={() => setItemType(tp)}
+                className={cn(
+                  "h-8 rounded-full border px-3 text-xs font-medium",
+                  itemType === tp ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {tp === "all" ? "All items" : ITEM_TYPE_LABEL[tp]}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState icon={PackageSearch} title="No medicines match these filters." />
+        <EmptyState icon={PackageSearch} title="No items match these filters." />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[760px] text-sm">
@@ -150,6 +174,9 @@ export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; s
                   {showFacility ? <td className="px-3 py-2 whitespace-nowrap">{r.facilityName}</td> : null}
                   <td className="px-3 py-2 font-medium whitespace-nowrap">
                     {r.medicineName}
+                    {r.itemType !== "medicine" ? (
+                      <span className="text-muted-foreground ml-1.5 text-[11px] font-normal">{ITEM_TYPE_LABEL[r.itemType]}</span>
+                    ) : null}
                     {r.medicineStatus !== "active" ? (
                       <span className="bg-critical/10 text-critical ml-2 rounded px-1.5 py-0.5 text-[11px] font-medium">
                         Withdrawn: return or quarantine

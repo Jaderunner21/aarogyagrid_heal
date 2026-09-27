@@ -19,7 +19,7 @@ import { formatNumber } from "@/lib/format"
 
 export const METHOD_LABEL: Record<string, string> = {
   holt_winters_yearly_adj: "Holt-Winters + yearly seasonal adjustment",
-  holt_winters_footfall_blend: "Holt-Winters, footfall-adjusted",
+  holt_winters_footfall_blend: "Holt-Winters, driver-adjusted",
   moving_average_fallback: "28-day average (fallback)",
   seed_moving_average: "Starter 28-day average",
 }
@@ -91,6 +91,7 @@ export function ForecastChart({
   const weight = detail.forecast?.footfall_weight
   const pooledFrom = detail.forecast?.seasonality_source && detail.forecast.seasonality_source !== "own" ? detail.forecast.seasonality_source : null
   const showFootfall = !isWarehouse && detail.footfall.length > 0
+  const beds = detail.driver === "beds"
 
   return (
     <figure className="space-y-2">
@@ -129,7 +130,10 @@ export function ForecastChart({
               labelFormatter={(d) => format(parseISO(String(d)), "d MMM yyyy")}
               formatter={(value, name) => {
                 if (Array.isArray(value)) return [`${formatNumber(Number(value[0]), 1)} – ${formatNumber(Number(value[1]), 1)}`, "80% band"]
-                if (name === "footfall") return [`${formatNumber(Number(value))} patients / day`, "Footfall (7-day average)"]
+                if (name === "footfall")
+                  return beds
+                    ? [`${formatNumber(Number(value))} beds`, "Occupied critical-care beds (7-day average)"]
+                    : [`${formatNumber(Number(value))} patients / day`, "Footfall (7-day average)"]
                 const label =
                   name === "actual" ? "Used" : name === "yhat" ? "Forecast / day" : name === "stock" ? "Projected stock" : String(name)
                 return [`${formatNumber(Number(value), 1)} ${unit}s`, label]
@@ -197,11 +201,11 @@ export function ForecastChart({
         <LegendDot color="#94A3B8" label={isWarehouse ? "Issued / day" : "Used / day"} />
         <LegendDot color="#0F766E" label="Forecast (80% band)" />
         <LegendDot color="#2563EB" label="Projected stock (right axis)" dashed />
-        {showFootfall ? <LegendDot color="#A78BFA" label="Patients (7-day trend)" /> : null}
+        {showFootfall ? <LegendDot color="#A78BFA" label={beds ? "Occupied ICU/HDU/NICU beds (7-day trend)" : "Patients (7-day trend)"} /> : null}
         <span className="ml-auto text-right">
           {method ? (METHOD_LABEL[method] ?? method) : "No forecast yet"}
           {method === "holt_winters_footfall_blend" && weight !== null && weight !== undefined
-            ? ` (${Math.round(Number(weight) * 100)}% footfall-based)`
+            ? ` (${Math.round(Number(weight) * 100)}% ${beds ? "bed-occupancy" : "footfall"}-based)`
             : ""}
           {mape !== null && mape !== undefined
             ? ` · backtest error ${Number(mape) < 0.01 ? "under 1%" : `${Math.round(Number(mape) * 100)}%`}`

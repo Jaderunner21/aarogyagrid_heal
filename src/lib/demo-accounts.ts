@@ -13,6 +13,8 @@ export type DemoAccount = {
   state: "Rajasthan" | "Gujarat" | "India"
   /** PHC logins only: the medical officer or the staff login */
   phcPosition?: "staff" | "medical_officer"
+  /** facility logins: which level of care (default PHC) */
+  facilityType?: "shc" | "phc" | "chc" | "dh"
 }
 
 // staff = the PHC login for daily entry; doctor = the medical officer (matches the staff roster)
@@ -82,6 +84,67 @@ const phcAccount =
       phcPosition: "medical_officer",
     },
   ]
+
+// Sub-centres (db/seed/005_expansion_seed.sql): one ANM login each, no doctor.
+const subCentres: { code: string; place: string; district: string; state: DemoAccount["state"]; staff: string }[] = [
+  { code: "SHC-DGP-01", place: "Obri", district: "Dungarpur", state: "Rajasthan", staff: "Sarita Roat" },
+  { code: "SHC-DGP-02", place: "Jetana", district: "Dungarpur", state: "Rajasthan", staff: "Kamla Damor" },
+  { code: "SHC-DGP-03", place: "Poonali", district: "Dungarpur", state: "Rajasthan", staff: "Lalita Katara" },
+  { code: "SHC-DGP-04", place: "Pindawal", district: "Dungarpur", state: "Rajasthan", staff: "Geeta Pargi" },
+  { code: "SHC-DGP-05", place: "Dhambola", district: "Dungarpur", state: "Rajasthan", staff: "Manju Ahari" },
+  { code: "SHC-DGP-06", place: "Rampur", district: "Dungarpur", state: "Rajasthan", staff: "Santosh Bhagora" },
+  { code: "SHC-ARV-01", place: "Anandpura", district: "Aravalli", state: "Gujarat", staff: "Hetal Khant" },
+  { code: "SHC-ARV-02", place: "Ambaliyara", district: "Aravalli", state: "Gujarat", staff: "Rinku Damor" },
+  { code: "SHC-ARV-03", place: "Dholiya", district: "Aravalli", state: "Gujarat", staff: "Jyoti Asari" },
+  { code: "SHC-ARV-04", place: "Torda", district: "Aravalli", state: "Gujarat", staff: "Bhavna Pandor" },
+  { code: "SHC-ARV-05", place: "Jitpur", district: "Aravalli", state: "Gujarat", staff: "Varsha Ninama" },
+  { code: "SHC-ARV-06", place: "Kishangadh", district: "Aravalli", state: "Gujarat", staff: "Shilpa Tabiyad" },
+]
+
+// CHCs and district hospitals: a staff login and a doctor login each.
+const hospitals: {
+  code: string
+  type: "chc" | "dh"
+  label: string
+  district: string
+  state: DemoAccount["state"]
+  staff: string
+  doctor: string
+}[] = [
+  { code: "CHC-DGP-01", type: "chc", label: "CHC Jhonthri", district: "Dungarpur", state: "Rajasthan", staff: "Mukesh Kalal", doctor: "Dr. Sanjay Roat" },
+  { code: "DH-DGP", type: "dh", label: "District Hospital Dungarpur", district: "Dungarpur", state: "Rajasthan", staff: "Anita Joshi", doctor: "Dr. Vivek Trivedi" },
+  { code: "CHC-ARV-01", type: "chc", label: "CHC Tintoi", district: "Aravalli", state: "Gujarat", staff: "Jignesh Parmar", doctor: "Dr. Nirali Shah" },
+  { code: "DH-ARV", type: "dh", label: "District Hospital Aravalli", district: "Aravalli", state: "Gujarat", staff: "Kinjal Patel", doctor: "Dr. Harshad Solanki" },
+]
+
+const levelAccounts: DemoAccount[] = [
+  ...hospitals.flatMap((h): DemoAccount[] =>
+    (["staff", "medical_officer"] as const).map((pos) => ({
+      email: `${pos === "staff" ? "staff" : "mo"}.${h.code.toLowerCase()}@heal.demo`,
+      fullName: pos === "staff" ? h.staff : h.doctor,
+      role: "phc_staff",
+      scope: h.code,
+      label: h.label,
+      district: h.district,
+      state: h.state,
+      phcPosition: pos,
+      facilityType: h.type,
+    })),
+  ),
+  ...subCentres.map(
+    (s): DemoAccount => ({
+      email: `shc.${s.code.toLowerCase()}@heal.demo`,
+      fullName: s.staff,
+      role: "phc_staff",
+      scope: s.code,
+      label: `SHC ${s.place}`,
+      district: s.district,
+      state: s.state,
+      phcPosition: "staff",
+      facilityType: "shc",
+    }),
+  ),
+]
 
 export const DEMO_ACCOUNTS: DemoAccount[] = [
   {
@@ -201,6 +264,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     state: "Gujarat",
   },
   ...gujaratPhcs.flatMap(phcAccount("Gujarat")),
+  ...levelAccounts,
 ]
 
 export function isDemoEmail(email: string): boolean {

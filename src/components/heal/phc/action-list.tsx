@@ -8,7 +8,7 @@ import type { IndentView, TransferView } from "@/lib/queries"
 import { t, type Lang } from "@/lib/i18n"
 
 export type ActionItem =
-  | { mode: "dispatch"; item: TransferView }
+  | { mode: "dispatch"; item: TransferView | IndentView }
   | { mode: "receive"; item: TransferView | IndentView }
 
 /** Mobile-first "Needs your action" list: one big button per item. */
@@ -20,7 +20,9 @@ export function ActionList({ items, lang }: { items: ActionItem[]; lang: Lang })
         const qty = item.kind === "transfer" ? item.qty : (item.qtyApproved ?? item.qtyRequested)
         const other =
           mode === "dispatch"
-            ? (item as TransferView).toName
+            ? item.kind === "transfer"
+              ? item.toName
+              : item.facilityName
             : item.kind === "transfer"
               ? item.fromName
               : item.warehouseName
@@ -47,7 +49,7 @@ export function ActionList({ items, lang }: { items: ActionItem[]; lang: Lang })
             </div>
             <div className="w-full sm:w-auto [&_button]:h-11 [&_button]:w-full sm:[&_button]:w-auto">
               {mode === "dispatch" ? (
-                <DispatchDialog item={item as TransferView} size="lg" lang={lang} />
+                <DispatchDialog item={item} size="lg" lang={lang} fromFacility />
               ) : (
                 <ReceiveDialog item={item} size="lg" lang={lang} />
               )}
