@@ -1,5 +1,6 @@
 "use client"
 
+import { usageRate } from "@/lib/rate"
 import { useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, PackageSearch, Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -144,7 +145,7 @@ export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; s
                 {header("Medicine", "medicine")}
                 {header("Category", "category")}
                 {header("Quantity", "quantity", "text-right")}
-                {header("Predicted / day", "pdu", "text-right")}
+                {header("Usage", "pdu", "text-right")}
                 {header("Days left", "days")}
                 <th className="px-3 py-2 font-medium">Status</th>
                 {header("Stock-out", "stockout")}
@@ -187,7 +188,9 @@ export function StockTable({ rows, showFacility = false }: { rows: StockRow[]; s
                   <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
                     {formatNumber(r.quantity)} <span className="text-muted-foreground text-xs">{r.unit}s</span>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{r.pdu !== null ? formatNumber(r.pdu, 1) : "—"}</td>
+                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" title={r.pdu !== null ? `about ${formatNumber(r.pdu, 1)} a day on average` : undefined}>
+                    {usageRate(r.pdu)}
+                  </td>
                   <td className="px-3 py-2">
                     <DaysLeftBar daysLeft={r.daysLeft} resupplyDays={r.resupplyDays} status={r.status} />
                   </td>

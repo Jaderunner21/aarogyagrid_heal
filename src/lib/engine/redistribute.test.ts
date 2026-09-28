@@ -152,10 +152,10 @@ describe("stockAlerts", () => {
     expect(stockAlerts(fact(30), th)).toHaveLength(0)
     expect(stockAlerts(fact(120), th)[0]).toMatchObject({ type: "overstock", severity: "info" })
   })
-  it("uses the brief's message template", () => {
-    expect(stockAlerts(fact(1.4), th)[0].message).toBe(
-      "Paracetamol 500mg: 78 tablets left (~1.4 days at 53.8/day). Normal resupply takes 7 days.",
-    )
+  it("uses the brief's message template, with whole numbers", () => {
+    expect(stockAlerts(fact(1.4), th)[0].message).toBe("Paracetamol 500mg: 78 tablets left (~1 day at 54/day). Normal resupply takes 7 days.")
+    expect(stockAlerts(fact(0.4), th)[0].message).toBe("Paracetamol 500mg: 78 tablets left (under 1 day at 54/day). Normal resupply takes 7 days.")
+    expect(stockAlerts({ ...fact(0), stock: 0, pdu: 0.2 }, th)[0].message).toBe("Paracetamol 500mg: out of stock (uses about 6/month). Normal resupply takes 7 days.")
   })
 })
 

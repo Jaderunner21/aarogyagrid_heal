@@ -1,5 +1,6 @@
 "use client"
 
+import { usageRate } from "@/lib/rate"
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2, Send } from "lucide-react"
@@ -91,7 +92,7 @@ export function RaiseIndentForm({ stock, lang }: { stock: StockRow[]; lang: Lang
         {selected ? (
           <p className="text-muted-foreground text-xs">
             {t(lang, "phc.suggested")}: {formatNumber(suggestedQty(selected))} (
-            {formatNumber(selected.pdu ?? 0, 1)}/day × 30 − {formatNumber(selected.quantity)})
+            {usageRate(selected.pdu)} for 30 days, minus {formatNumber(selected.quantity)} in stock)
           </p>
         ) : null}
       </div>

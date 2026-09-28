@@ -1,4 +1,5 @@
 // Alert rules. Pure: turns engine facts into the set of alerts that should be live.
+import { daysText, usageRate } from "../rate"
 import type { Enums, Json } from "@/lib/database.types"
 import type { SurgeCheck } from "./forecast"
 
@@ -26,7 +27,6 @@ export type StockFact = {
   resupplyDays: number
 }
 
-const fmt = (x: number) => (x < 10 ? x.toFixed(1) : Math.round(x).toString())
 const fmtQty = (x: number) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(x)
 
 export function stockAlerts(f: StockFact, th: Thresholds): DesiredAlert[] {
@@ -39,7 +39,11 @@ export function stockAlerts(f: StockFact, th: Thresholds): DesiredAlert[] {
       type: "stockout_risk",
       severity: f.daysLeft < f.resupplyDays ? "critical" : "warning",
       daysLeft: f.daysLeft,
-      message: `${f.medicineName}: ${fmtQty(f.stock)} ${f.unit}s left (~${fmt(f.daysLeft)} days at ${f.pdu.toFixed(1)}/day). Normal resupply takes ${f.resupplyDays} days.`,
+      // the brief's template, with whole numbers: "{medicine}: {qty} {unit}s left (~{days} at {rate}). Normal resupply takes {n} days."
+      message:
+        f.stock <= 0
+          ? `${f.medicineName}: out of stock${f.pdu > 0 ? ` (uses about ${usageRate(f.pdu)})` : ""}. Normal resupply takes ${f.resupplyDays} days.`
+          : `${f.medicineName}: ${fmtQty(f.stock)} ${f.unit}s left (${f.daysLeft < 1 ? daysText(f.daysLeft) : `~${daysText(f.daysLeft)}`} at ${usageRate(f.pdu)}). Normal resupply takes ${f.resupplyDays} days.`,
     })
   } else if (f.daysLeft > th.overstockDays) {
     out.push({
@@ -151,8 +155,8 @@ export function surgeAlert(c: SurgeContext, s: SurgeCheck): DesiredAlert {
     severity: "critical",
     daysLeft: null,
     message:
-      `${c.medicineName}: ${fmt(perDay)} ${c.unit}s/day over the last 3 days, against about ${fmt(s.expected)} expected ` +
-      `(${s.ratio.toFixed(1)}× the usual ${fmt(s.baseline)}/day).` +
+      `${c.medicineName}: ${usageRate(perDay)} over the last 3 days, against about ${usageRate(s.expected)} expected ` +
+      `(${s.ratio.toFixed(1)}× the usual ${usageRate(s.baseline)}).` +
       (c.footfallRatio ? ` Patient footfall is up ${Math.round((c.footfallRatio - 1) * 100)}%.` : ""),
     facts: {
       kind: "demand_surge",

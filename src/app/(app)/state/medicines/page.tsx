@@ -24,11 +24,11 @@ export default async function StateMedicines() {
 
   return (
     <div>
-      <PageHeader title="Medicines across districts" description="How many PHCs in each district are critical for each medicine." />
+      <PageHeader title="Medicines across districts" description="How many health facilities in each district are critical for each medicine." />
       <div className="bg-card rounded-xl border p-4">
         <Heatmap
           mode="count"
-          rows={districts.map(([id, name]) => ({ id, label: name, sub: `${stock.filter((s) => s.districtId === id).length / medicines.length} PHCs` }))}
+          rows={districts.map(([id, name]) => ({ id, label: name, sub: `${new Set(stock.filter((s) => s.districtId === id).map((s) => s.facilityId)).size} facilities` }))}
           cols={medicines.map(([id, name]) => ({ id, label: name }))}
           cells={cells}
           rowHref="/state/districts/"

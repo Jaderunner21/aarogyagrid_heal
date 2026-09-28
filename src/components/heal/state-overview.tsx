@@ -92,7 +92,7 @@ export async function StateOverview({
           value={phcCritical}
           status={phcCritical ? "critical" : "ok"}
           icon={Building2}
-          sub={`of ${facilities.filter((f) => f.type !== "warehouse").length} PHCs`}
+          sub={`of ${facilities.filter((f) => f.type !== "warehouse").length} facilities`}
         />
         <StatTile label="Critical items" value={formatNumber(criticalItems)} status={criticalItems ? "critical" : "ok"} icon={AlertOctagon} />
         <StatTile

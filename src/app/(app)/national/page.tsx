@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { usageRate } from "@/lib/rate"
 import { format, subDays } from "date-fns"
 import Link from "next/link"
 import { Activity, AlertOctagon, Building2, Map as MapIcon, Siren } from "lucide-react"
@@ -185,7 +186,7 @@ export default async function NationalPage() {
                     <th className="px-4 py-2 font-medium">State · District</th>
                     <th className="px-3 py-2 font-medium">Facility</th>
                     <th className="px-3 py-2 font-medium">Medicine</th>
-                    <th className="px-3 py-2 text-right font-medium">Forecast / day</th>
+                    <th className="px-3 py-2 text-right font-medium">Usage</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -196,7 +197,7 @@ export default async function NationalPage() {
                       </td>
                       <td className="px-3 py-2 font-medium">{s.facilityName}</td>
                       <td className="text-critical px-3 py-2 font-medium">{s.medicineName}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatNumber(s.pdu, 1)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{usageRate(s.pdu)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -206,7 +207,7 @@ export default async function NationalPage() {
         </Section>
         <div className="space-y-5">
           <AiBriefCard scopeType="national" scopeId={NATIONAL_SCOPE} initial={brief.data ?? null} title="AI national brief" />
-          <Section title="Medicines at risk nationally" description="Number of PHCs where the medicine is critical">
+          <Section title="Medicines at risk nationally" description="Number of facilities where the medicine is critical">
             <MedicinesAtRiskChart data={topMedicines} />
           </Section>
         </div>

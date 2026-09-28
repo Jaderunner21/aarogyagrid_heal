@@ -1,5 +1,6 @@
 "use client"
 
+import { usageRange, usageRate } from "@/lib/rate"
 import { Sparkles } from "lucide-react"
 import { ForecastChart } from "@/components/heal/forecast-chart"
 import { StatusBadge } from "@/components/heal/status-badge"
@@ -28,11 +29,11 @@ export function ForecastPanel({ detail, lang = "en" }: { detail: ForecastDetail;
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KeyNumber label="In stock" value={`${formatNumber(s?.quantity)} ${unit}s`} />
         <KeyNumber
-          label={isWarehouse ? "Issues / day" : "Predicted use / day"}
-          value={pdu !== null && pdu !== undefined ? formatNumber(pdu, 1) : "—"}
+          label={isWarehouse ? "Expected issues" : "Expected use"}
+          value={usageRate(pdu)}
           sub={
-            s?.lower !== null && s?.lower !== undefined && s?.upper !== null && s?.upper !== undefined
-              ? `range ${formatNumber(s.lower, 1)}–${formatNumber(s.upper, 1)}`
+            s?.lower !== null && s?.lower !== undefined && s?.upper !== null && s?.upper !== undefined && pdu
+              ? `likely ${usageRange(s.lower, s.upper, pdu)}`
               : undefined
           }
         />

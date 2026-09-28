@@ -1,3 +1,4 @@
+import { daysText } from "@/lib/rate"
 import { format, formatDistanceToNowStrict, isThisYear, parseISO } from "date-fns"
 
 const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 })
@@ -25,9 +26,8 @@ export function formatDateTime(value: string | Date | null | undefined): string 
 /** One decimal under 10 days, whole numbers above, "Out of stock" at 0. */
 export function formatDaysLeft(days: number | null | undefined): string {
   if (days === null || days === undefined) return "No forecast"
-  if (days <= 0) return "Out of stock"
-  if (days < 10) return `${days.toFixed(1)} days`
-  return `${Math.round(days)} days`
+  if (days < 0.05) return "Out of stock"
+  return daysText(days)
 }
 
 export function formatPercent(rate: number | null | undefined): string {

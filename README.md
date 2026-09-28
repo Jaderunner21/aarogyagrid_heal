@@ -103,6 +103,7 @@ A read-only [HL7 FHIR R4](https://hl7.org/fhir/R4/) API at `/api/fhir`, so state
 - Maternal-care items at facilities with a **LaQshya**-certified labour room are handled first when stock is short.
 - Facilities with under a year of history **borrow seasonal patterns** from their district, state or the whole country.
 - Every forecast is **back-tested** on the last 14 days; accuracy is shown per state.
+- Screens show usage as whole numbers in a period people can picture (**54/day**, **11/week**, **6/month**) and stock as whole days.
 
 ### Where AI is used
 

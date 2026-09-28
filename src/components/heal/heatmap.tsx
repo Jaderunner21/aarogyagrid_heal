@@ -93,9 +93,11 @@ export function Heatmap({
                         ? "–"
                         : cell.daysLeft >= 99
                           ? "99+"
-                          : cell.daysLeft < 10
-                            ? cell.daysLeft.toFixed(1)
-                            : Math.round(cell.daysLeft).toString()
+                          : cell.daysLeft < 0.05
+                            ? "0"
+                            : cell.daysLeft < 1
+                              ? "<1"
+                              : Math.round(cell.daysLeft).toString()
                   const tip =
                     mode === "count"
                       ? `${c.label} · ${r.label}: ${cell?.count ?? 0} of ${cell?.total ?? 0} facilities critical`

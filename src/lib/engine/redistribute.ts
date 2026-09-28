@@ -1,3 +1,5 @@
+import { daysText, stockSituation, usageRate } from "../rate"
+
 // Redistribution planner. Pure: given receivers, donors and settings, returns the
 // transfers and indents to propose. The runner deletes stale AI proposals and inserts these.
 
@@ -80,7 +82,7 @@ export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; l
 }
 
 const r1 = (x: number) => Math.round(x * 10) / 10
-const fmtDays = (x: number | null) => (x === null ? "unknown" : x < 10 ? x.toFixed(1) : Math.round(x).toString())
+
 
 type Donor = { facilityId: string; medicineId: string; spare: number; stock: number; pdu: number }
 
@@ -159,7 +161,7 @@ export function planRedistribution({
       isCrossDistrict: cross,
       priority: r.surge || r.priority || (r.daysLeft !== null && r.daysLeft < target.resupplyDays) ? 1 : 2,
       alertId: r.alertId,
-      reason: `${target.name} has ${fmtDays(r.daysLeft)} days of stock (${Math.round(r.stock)} at ${r1(r.pdu ?? 0)}/day) against a ${target.resupplyDays}-day resupply; ${donor.f.name} can spare ${qty} and still keep ${fmtDays(donorAfter)} days. ${alternatives.join(" ")} Distance ${r1(donor.km)} km.`.replace(/\s+/g, " "),
+      reason: `${target.name} has ${stockSituation(r.stock, r.pdu, r.daysLeft)} against a ${target.resupplyDays}-day resupply; ${donor.f.name} can spare ${qty} and still keep ${daysText(donorAfter)}. ${alternatives.join(" ")} Distance ${Math.round(donor.km)} km.`.replace(/\s+/g, " "),
       facts: {
         receiverStock: r.stock,
         receiverPdu: r.pdu ?? 0,
@@ -206,8 +208,8 @@ export function planRedistribution({
         qty: need,
         alertId: r.alertId,
         reason: hasTime
-          ? `${fmtDays(r.daysLeft)} days of stock left (${Math.round(r.stock)} at ${r1(r.pdu)}/day), enough time for the normal ${target.resupplyDays}-day resupply; ${supplierName} has ${wh.spare + need} spare. Request ${need} for ${settings.targetCoverDays} days of cover.`
-          : `Urgent: ${fmtDays(r.daysLeft)} days of stock left (${Math.round(r.stock)} at ${r1(r.pdu)}/day). ${supplierName} has ${wh.spare + need} spare: send ${need} now for ${settings.targetCoverDays} days of cover.`,
+          ? `${stockSituation(r.stock, r.pdu, r.daysLeft)}, enough time for the normal ${target.resupplyDays}-day resupply; ${supplierName} has ${wh.spare + need} spare. Request ${need} for ${settings.targetCoverDays} days of cover.`
+          : `Urgent: ${stockSituation(r.stock, r.pdu, r.daysLeft)}. ${supplierName} has ${wh.spare + need} spare: send ${need} now for ${settings.targetCoverDays} days of cover.`,
         facts: { receiverStock: r.stock, receiverPdu: r.pdu, receiverDaysLeft: r.daysLeft, need, donorStock: wh.stock, alternatives: [] },
       })
       continue
@@ -259,7 +261,7 @@ export function planRedistribution({
       const wh = spare.get(key(u.target.supplyingWarehouse, u.r.medicineId))
       const whHas = Boolean(wh && wh.spare >= u.remaining)
       if (wh && whHas) wh.spare -= u.remaining
-      const situation = `${fmtDays(u.r.daysLeft)} days of stock left (${Math.round(u.r.stock)} at ${r1(u.r.pdu ?? 0)}/day); ${u.remaining} needed for ${settings.targetCoverDays} days of cover.`
+      const situation = `${stockSituation(u.r.stock, u.r.pdu, u.r.daysLeft)}; ${u.remaining} needed for ${settings.targetCoverDays} days of cover.`
       proposals.push({
         kind: "indent",
         medicineId: u.r.medicineId,
@@ -384,7 +386,7 @@ export function planNearExpiry({
         isCrossDistrict: false,
         priority: 2,
         alertId: "",
-        reason: `Near expiry: batch ${b.batchNo} at ${holder.name} expires in ${b.daysToExpiry} days and it will only use about ${usable} by then. ${c.f.name} uses ${r1(c.p.pdu ?? 0)}/day and will finish its stock plus these ${qty} in about ${fmtDays(recvDays)} days, before the expiry. Distance ${r1(c.km)} km.`,
+        reason: `Near expiry: batch ${b.batchNo} at ${holder.name} expires in ${b.daysToExpiry} days and it will only use about ${usable} by then. ${c.f.name} uses ${usageRate(c.p.pdu)} and will finish its stock plus these ${qty} in about ${daysText(recvDays)}, before the expiry. Distance ${Math.round(c.km)} km.`,
         facts: {
           receiverStock: c.p.stock,
           receiverPdu: c.p.pdu ?? 0,

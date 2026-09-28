@@ -10,11 +10,13 @@ export const metadata: Metadata = { title: "Medicines" }
 export default async function NationalMedicines() {
   await requireRole("national_admin")
   const db = await createClient()
-  const [stock, states, districts] = await Promise.all([
-    getStock(db, { facilityType: "phc" }),
+  const [allStock, states, districts] = await Promise.all([
+    getStock(db),
     db.from("states").select("id, name").order("name"),
     db.from("districts").select("id, state_id"),
   ])
+  // every health facility (sub-centre, PHC, CHC, district hospital); warehouses are not counted
+  const stock = allStock.filter((s) => s.facilityType !== "warehouse")
   const districtState = new Map((districts.data ?? []).map((d) => [d.id, d.state_id]))
   const medicines = [...new Map(stock.map((s) => [s.medicineId, s.medicineName])).entries()].sort((a, b) => a[1].localeCompare(b[1]))
   const cells = (states.data ?? []).flatMap((st) =>
@@ -26,14 +28,14 @@ export default async function NationalMedicines() {
   )
   return (
     <div>
-      <PageHeader title="Medicines across states" description="How many PHCs in each state are critical for each medicine." />
+      <PageHeader title="Medicines across states" description="How many health facilities in each state are critical for each medicine." />
       <div className="bg-card rounded-xl border p-4">
         <Heatmap
           mode="count"
           rows={(states.data ?? []).map((s) => ({
             id: s.id,
             label: s.name,
-            sub: `${new Set(stock.filter((r) => districtState.get(r.districtId) === s.id).map((r) => r.facilityId)).size} PHCs`,
+            sub: `${new Set(stock.filter((r) => districtState.get(r.districtId) === s.id).map((r) => r.facilityId)).size} facilities`,
           }))}
           cols={medicines.map(([id, name]) => ({ id, label: name }))}
           cells={cells}

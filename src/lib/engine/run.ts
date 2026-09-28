@@ -1,4 +1,5 @@
 import "server-only"
+import { usageRate } from "@/lib/rate"
 // Engine runner: forecast → alerts (stock, surge, expiry, staff, beds) → outbreaks
 // → redistribution (incl. near-expiry moves) for a facility, district, state or the whole nation.
 // Uses the service-role client; the API route checks the caller before calling this.
@@ -487,7 +488,7 @@ export async function runEngine(
         type: "stockout_risk",
         severity: "critical",
         daysLeft: 0,
-        message: `${m.name}: reported out of stock by staff at ${at} (the record showed ${Math.round(report.stockOnRecord)}). Uses about ${(p.fc.predictedDailyUse ?? 0).toFixed(1)} ${m.unit}s a day; normal resupply takes ${f.resupply_days} days.`,
+        message: `${m.name}: reported out of stock by staff at ${at} (the record showed ${Math.round(report.stockOnRecord)}). Uses about ${usageRate(p.fc.predictedDailyUse)}; normal resupply takes ${f.resupply_days} days.`,
       })
     } else if (m.status === "active") {
       desired.push(
@@ -734,30 +735,51 @@ export async function runEngine(
 
   // ---------------------------------------------------------------- 4. redistribution
   const scopeSet = new Set(scopeFacilityIds)
+  // The suggestions still waiting from the last run. A suggestion that is made again is kept as it is
+  // (no second "approval needed" notification, and its explanation stays); a changed quantity is
+  // updated in place; one that is no longer needed is removed.
+  const tKey = (from: string, to: string, m: string) => `${from}>${to}:${m}`
+  const iKey = (f: string, w: string, m: string) => `${f}>${w}:${m}`
+  const pendingT = new Map<string, Tables<"transfers">>()
+  const pendingI = new Map<string, Tables<"indents">>()
+  const duplicates: { table: "transfers" | "indents"; id: string }[] = []
   for (let i = 0; i < scopeFacilityIds.length; i += 100) {
     const ids = scopeFacilityIds.slice(i, i + 100)
-    let del = db.from("transfers").delete().eq("origin", "ai").eq("status", "proposed").in("to_facility_id", ids)
-    if (scope === "district") del = del.eq("is_cross_district", false)
-    const t = await del
+    let tq = db.from("transfers").select("*").eq("origin", "ai").eq("status", "proposed").in("to_facility_id", ids)
+    if (scope === "district") tq = tq.eq("is_cross_district", false)
+    const [t, n] = await Promise.all([tq, db.from("indents").select("*").eq("origin", "ai").eq("status", "submitted").in("facility_id", ids)])
     if (t.error) throw new Error(t.error.message)
-    const n = await db.from("indents").delete().eq("origin", "ai").eq("status", "submitted").in("facility_id", ids)
     if (n.error) throw new Error(n.error.message)
+    for (const r of t.data ?? []) {
+      const key = tKey(r.from_facility_id, r.to_facility_id, r.medicine_id)
+      if (pendingT.has(key)) duplicates.push({ table: "transfers", id: r.id })
+      else pendingT.set(key, r)
+    }
+    for (const r of n.data ?? []) {
+      const key = iKey(r.facility_id, r.warehouse_id, r.medicine_id)
+      if (pendingI.has(key)) duplicates.push({ table: "indents", id: r.id })
+      else pendingI.set(key, r)
+    }
   }
+  const pendingIds = new Set([...[...pendingT.values()].map((r) => r.id), ...[...pendingI.values()].map((r) => r.id), ...duplicates.map((d) => d.id)])
 
   const k = (f: string, m: string) => `${f}:${m}`
   const incoming = new Map<string, number>()
   const outgoing = new Map<string, number>()
   const add = (map: Map<string, number>, key: string, q: number) => map.set(key, (map.get(key) ?? 0) + q)
   const [openT, openI] = await Promise.all([
-    db.from("transfers").select("from_facility_id, to_facility_id, medicine_id, qty, status").in("status", ["proposed", "approved", "dispatched"]),
-    db.from("indents").select("facility_id, warehouse_id, medicine_id, qty_requested, qty_approved, status").in("status", ["submitted", "approved", "dispatched"]),
+    db.from("transfers").select("id, from_facility_id, to_facility_id, medicine_id, qty, status").in("status", ["proposed", "approved", "dispatched"]),
+    db.from("indents").select("id, facility_id, warehouse_id, medicine_id, qty_requested, qty_approved, status").in("status", ["submitted", "approved", "dispatched"]),
   ])
   for (const t of openT.data ?? []) {
+    // this run re-plans its own pending suggestions, so they are not stock on its way
+    if (pendingIds.has(t.id)) continue
     if (!scopeSet.has(t.to_facility_id) && !scopeSet.has(t.from_facility_id)) continue
     add(incoming, k(t.to_facility_id, t.medicine_id), Number(t.qty))
     if (t.status !== "dispatched") add(outgoing, k(t.from_facility_id, t.medicine_id), Number(t.qty))
   }
   for (const i of openI.data ?? []) {
+    if (pendingIds.has(i.id)) continue
     if (!scopeSet.has(i.facility_id)) continue
     const q = Number(i.qty_approved ?? i.qty_requested)
     add(incoming, k(i.facility_id, i.medicine_id), q)
@@ -824,8 +846,28 @@ export async function runEngine(
 
   const transferRows: TablesInsert<"transfers">[] = []
   const indentRows: TablesInsert<"indents">[] = []
+  // for each proposal: the row it lives in, and whether it needs a (new) explanation
+  const rowOf: ({ table: "transfers" | "indents"; id: string | null; explain: boolean } | null)[] = []
+  const keptT = new Set<string>()
+  const keptI = new Set<string>()
+  const updatesT: { id: string; patch: Partial<Tables<"transfers">> }[] = []
+  const updatesI: { id: string; patch: Partial<Tables<"indents">> }[] = []
   for (const p of proposals) {
     if (p.kind === "transfer") {
+      const key = tKey(p.fromId, p.toId, p.medicineId)
+      const old = keptT.has(key) ? undefined : pendingT.get(key)
+      if (old) {
+        keptT.add(key)
+        const changed = Number(old.qty) !== p.qty || old.priority !== p.priority
+        if (changed) {
+          updatesT.push({
+            id: old.id,
+            patch: { qty: p.qty, priority: p.priority, ai_reason: p.reason, ai_generated_at: null, distance_km: p.distanceKm, alert_id: p.alertId || null },
+          })
+        }
+        rowOf.push({ table: "transfers", id: old.id, explain: changed })
+        continue
+      }
       transferRows.push({
         medicine_id: p.medicineId,
         from_facility_id: p.fromId,
@@ -839,7 +881,17 @@ export async function runEngine(
         ai_reason: p.reason,
         alert_id: p.alertId || null,
       })
+      rowOf.push({ table: "transfers", id: null, explain: true })
     } else {
+      const key = iKey(p.facilityId, p.warehouseId, p.medicineId)
+      const old = keptI.has(key) ? undefined : pendingI.get(key)
+      if (old) {
+        keptI.add(key)
+        const changed = Number(old.qty_requested) !== p.qty
+        if (changed) updatesI.push({ id: old.id, patch: { qty_requested: p.qty, ai_reason: p.reason, ai_generated_at: null } })
+        rowOf.push({ table: "indents", id: old.id, explain: changed })
+        continue
+      }
       indentRows.push({
         facility_id: p.facilityId,
         warehouse_id: p.warehouseId,
@@ -849,8 +901,32 @@ export async function runEngine(
         status: "submitted",
         ai_reason: p.reason,
       })
+      rowOf.push({ table: "indents", id: null, explain: true })
     }
   }
+
+  // suggestions from the last run that are no longer made
+  const staleT = [...pendingT].filter(([key]) => !keptT.has(key)).map(([, r]) => r.id)
+  const staleI = [...pendingI].filter(([key]) => !keptI.has(key)).map(([, r]) => r.id)
+  staleT.push(...duplicates.filter((d) => d.table === "transfers").map((d) => d.id))
+  staleI.push(...duplicates.filter((d) => d.table === "indents").map((d) => d.id))
+  for (let i = 0; i < staleT.length; i += 100) {
+    const { error } = await db.from("transfers").delete().in("id", staleT.slice(i, i + 100)).eq("status", "proposed")
+    if (error) throw new Error(error.message)
+  }
+  for (let i = 0; i < staleI.length; i += 100) {
+    const { error } = await db.from("indents").delete().in("id", staleI.slice(i, i + 100)).eq("status", "submitted")
+    if (error) throw new Error(error.message)
+  }
+  for (const u of updatesT) {
+    const { error } = await db.from("transfers").update(u.patch).eq("id", u.id)
+    if (error) throw new Error(error.message)
+  }
+  for (const u of updatesI) {
+    const { error } = await db.from("indents").update(u.patch).eq("id", u.id)
+    if (error) throw new Error(error.message)
+  }
+
   const insertedT: { id: string }[] = []
   const insertedI: { id: string }[] = []
   for (let i = 0; i < transferRows.length; i += CHUNK) {
@@ -863,6 +939,12 @@ export async function runEngine(
     if (error) throw new Error(error.message)
     insertedI.push(...(data ?? []))
   }
+  // fill in the ids of the new rows, in order
+  let nt = 0
+  let ni = 0
+  for (const r of rowOf) {
+    if (r && r.id === null) r.id = (r.table === "transfers" ? insertedT[nt++] : insertedI[ni++])?.id ?? null
+  }
 
   // Facts for Gemini explanations (numbers come from the engine, never from the model).
   const month = new Date().toLocaleString("en-IN", { month: "long" })
@@ -871,15 +953,14 @@ export async function runEngine(
     return tail.length ? Math.round((tail.reduce((a, b) => a + b, 0) / tail.length) * 10) / 10 : null
   }
   const explain: ExplainFact[] = []
-  let ti = 0
-  let ii = 0
-  for (const p of proposals) {
+  proposals.forEach((p, n) => {
     const m = med.get(p.medicineId)
     const receiverId = p.kind === "transfer" ? p.toId : p.facilityId
     const donorId = p.kind === "transfer" ? p.fromId : p.warehouseId
     const rp = pairByKey.get(k(receiverId, p.medicineId))
-    const row = p.kind === "transfer" ? insertedT[ti++] : insertedI[ii++]
-    if (!row || !m) continue
+    const row = rowOf[n]
+    // unchanged suggestions keep the explanation they already have
+    if (!row?.id || !row.explain || !m) return
     explain.push({
       table: p.kind === "transfer" ? "transfers" : "indents",
       id: row.id,
@@ -889,7 +970,7 @@ export async function runEngine(
       receiver: fac.get(receiverId)?.name ?? "",
       donor: fac.get(donorId)?.name ?? "",
       qty: p.qty,
-      distanceKm: p.kind === "transfer" ? p.distanceKm : null,
+      distanceKm: p.kind === "transfer" ? Math.round(p.distanceKm) : null,
       receiverStock: p.facts.receiverStock,
       receiverPdu: p.facts.receiverPdu,
       receiverDaysLeft: p.facts.receiverDaysLeft,
@@ -897,12 +978,12 @@ export async function runEngine(
       yearlyRatio: rp ? rp.fc.yearlyRatio : null,
       surgeTimesBaseline: rp?.surge?.ratio ?? null,
       donorStockNow: p.facts.donorStock ?? null,
-      donorDaysAfter: p.facts.donorDaysAfter ?? null,
+      donorDaysAfter: p.facts.donorDaysAfter === null || p.facts.donorDaysAfter === undefined ? null : Math.round(p.facts.donorDaysAfter),
       alternatives: p.facts.alternatives,
       month,
       template: p.reason,
     })
-  }
+  })
 
   return {
     ...result,

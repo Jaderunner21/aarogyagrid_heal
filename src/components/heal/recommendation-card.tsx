@@ -61,7 +61,7 @@ export function RecommendationCard({
             {isTransfer && item.distanceKm !== null ? (
               <span className="inline-flex items-center gap-0.5">
                 · <MapPin className="size-3" aria-hidden="true" />
-                {formatNumber(item.distanceKm, 1)} km
+                {formatNumber(item.distanceKm)} km
               </span>
             ) : null}
           </p>
