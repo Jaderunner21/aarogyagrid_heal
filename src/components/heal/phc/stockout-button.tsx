@@ -86,9 +86,9 @@ export function StockoutButton({ lang, facilityId, items }: { lang: Lang; facili
                 className={cn(picked?.id === m.id && "bg-red-50 font-medium text-critical")}
               >
                 <PackageX className={cn("text-muted-foreground", picked?.id === m.id && "text-critical")} aria-hidden="true" />
-                <span className="truncate">{m.name}</span>
-                <span className="text-muted-foreground ml-auto text-xs">
-                  {formatNumber(m.quantity)} {m.unit}s {t(lang, "out.onRecord")}
+                <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                <span className="text-muted-foreground shrink-0 text-xs whitespace-nowrap" title={t(lang, "out.onRecord")}>
+                  {formatNumber(m.quantity)} {m.unit}s
                 </span>
               </CommandItem>
             ))}

@@ -100,9 +100,26 @@ describe("planNearExpiry", () => {
       settings,
     })
     expect(out).toHaveLength(1)
-    // A can use 10/day × 45 = 450 before expiry, minus its own 50 -> room for 400; the excess is min(300, 600-90)
-    expect(out[0]).toMatchObject({ fromId: "B", toId: "A", qty: 300, priority: 2 })
+    // B uses 90 of the batch before expiry, so 210 would expire; A can use 10/day × 45 = 450, minus its own 50 -> room for 400
+    expect(out[0]).toMatchObject({ fromId: "B", toId: "A", qty: 210, priority: 2 })
     expect(out[0].reason).toMatch(/Near expiry: batch X1/)
+  })
+
+  it("counts batches that expire earlier as used first", () => {
+    // B uses 2/day. X0 (100, expires day 20): 40 used, 60 expire.
+    // X1 (300, expires day 45): used from day 20 to 45 -> 50 used, 250 expire.
+    const out = planNearExpiry({
+      facilities,
+      pairs: [pair("B", 600, 2, 300), pair("A", 0, 20, 0)],
+      batches: [
+        { facilityId: "B", medicineId: "M", batchNo: "X0", qty: 100, daysToExpiry: 20 },
+        { facilityId: "B", medicineId: "M", batchNo: "X1", qty: 300, daysToExpiry: 45 },
+      ],
+      incoming: new Map(),
+      settings,
+    })
+    expect(out.find((t) => t.reason.includes("X0"))?.qty).toBe(60)
+    expect(out.find((t) => t.reason.includes("X1"))?.qty).toBe(250)
   })
 
   it("does not overload a recipient that cannot use it in time", () => {

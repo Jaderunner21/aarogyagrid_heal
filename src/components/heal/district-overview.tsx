@@ -70,7 +70,7 @@ export async function DistrictOverview({ db, districtId, viewer }: { db: DB; dis
       />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatTile
-          label="PHCs in critical state"
+          label="Facilities in critical state"
           value={`${formatNumber(summary?.facilitiesCritical ?? 0)} / ${formatNumber(phcs.length)}`}
           status={(summary?.facilitiesCritical ?? 0) > 0 ? "critical" : "ok"}
           icon={Building2}

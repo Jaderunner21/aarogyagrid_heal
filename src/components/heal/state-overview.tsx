@@ -88,7 +88,7 @@ export async function StateOverview({
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatTile label="Districts" value={districts.length} icon={MapIcon} sub={`${facilities.length} facilities`} />
         <StatTile
-          label="PHCs critical"
+          label="Facilities critical"
           value={phcCritical}
           status={phcCritical ? "critical" : "ok"}
           icon={Building2}
@@ -132,7 +132,7 @@ export async function StateOverview({
               <thead className="text-muted-foreground text-left text-xs">
                 <tr className="border-b">
                   <th className="py-2 pr-3 font-medium">District</th>
-                  <th className="px-3 py-2 text-right font-medium">PHCs critical</th>
+                  <th className="px-3 py-2 text-right font-medium">Facilities critical</th>
                   <th className="px-3 py-2 text-right font-medium">Critical items</th>
                   <th className="px-3 py-2 text-right font-medium">Open alerts</th>
                   <th className="px-3 py-2 text-right font-medium">Pending</th>

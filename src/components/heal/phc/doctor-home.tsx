@@ -45,6 +45,8 @@ export async function DoctorHome({ session }: { session: Session }) {
     getIndents(db, { warehouseId: fid, status: ["submitted", "approved"] }),
     getOpenStockouts(db, fid),
   ])
+  // the sub-centres' own stock, so their requests show how many days they have left
+  const subCentreStock = fromSubCentres.length && stock[0] ? await getStock(db, { districtId: stock[0].districtId, facilityType: "shc" }) : []
   const subCentreWaiting = fromSubCentres.filter((i) => i.status === "submitted" && !i.awaitingMo)
   const subCentreToSend = fromSubCentres.filter((i) => i.status === "approved")
 
@@ -139,7 +141,7 @@ export async function DoctorHome({ session }: { session: Session }) {
           className="border-amber-300 ring-4 ring-amber-100"
           bodyClassName="p-3"
         >
-          <RecommendationList items={enrich(subCentreWaiting, stock)} viewer={toViewer(session)} emptyIcon={ClipboardCheck} emptyText="" compact lang={lang} />
+          <RecommendationList items={enrich(subCentreWaiting, subCentreStock)} viewer={toViewer(session)} emptyIcon={ClipboardCheck} emptyText="" compact lang={lang} />
         </Section>
       ) : null}
 

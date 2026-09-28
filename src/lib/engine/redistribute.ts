@@ -300,6 +300,24 @@ export type NearExpiryBatch = {
 }
 
 /**
+ * How much of batch `b` its holder will use before it expires, first-expiry-first-out: the holder works
+ * through its batches in expiry order at `pdu` a day, and what an earlier batch has not used by its own
+ * expiry date is lost (written off or moved), not carried over.
+ */
+export function usableBeforeExpiry(batches: NearExpiryBatch[], b: NearExpiryBatch, pdu: number): number {
+  const mine = batches
+    .filter((x) => x.facilityId === b.facilityId && x.medicineId === b.medicineId)
+    .sort((x, y) => x.daysToExpiry - y.daysToExpiry || x.batchNo.localeCompare(y.batchNo))
+  let used = 0 // total consumed so far, counted from today
+  for (const x of mine) {
+    const u = Math.max(0, Math.min(x.qty, Math.floor(pdu * x.daysToExpiry) - used))
+    if (x === b) return u
+    used += u
+  }
+  return 0
+}
+
+/**
  * For batches expiring within 90 days, the part the holder won't use before expiry is offered to the
  * nearest facility in the same district that will use its current stock *and* the transfer before
  * that date. Recipients never receive more than they can use in time.
@@ -331,9 +349,8 @@ export function planNearExpiry({
     const hp = byKey.get(key(b.facilityId, b.medicineId))
     // sub-centres never send stock sideways; their PHC handles returns
     if (!holder || holder.type === "shc" || !hp || hp.pdu === null) continue
-    // the holder uses other (earlier) stock first too, so what it can use of this batch is bounded by its own pace
-    const usable = Math.floor(hp.pdu * b.daysToExpiry)
-    let excess = Math.min(b.qty, Math.floor(hp.stock - usable))
+    const usable = usableBeforeExpiry(batches, b, hp.pdu)
+    let excess = Math.min(b.qty - usable, Math.floor(hp.stock))
     if (excess < settings.minTransferQty) continue
 
     const candidates = pairs

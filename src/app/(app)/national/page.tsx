@@ -93,7 +93,7 @@ export default async function NationalPage() {
         <StatTile label="States" value={stateList.length} icon={MapIcon} sub={`${districts.length} districts`} />
         <StatTile label="Facilities" value={facilities.length} icon={Building2} sub={`${phcs.length} PHCs`} />
         <StatTile
-          label="PHCs critical"
+          label="Facilities critical"
           value={perState.reduce((a, s) => a + s.phcsCritical, 0)}
           status="critical"
           icon={AlertOctagon}
@@ -125,7 +125,7 @@ export default async function NationalPage() {
               <tr>
                 <th className="px-4 py-2.5 font-medium">State</th>
                 <th className="px-3 py-2.5 text-right font-medium">Districts</th>
-                <th className="px-3 py-2.5 text-right font-medium">PHCs critical</th>
+                <th className="px-3 py-2.5 text-right font-medium">Facilities critical</th>
                 <th className="px-3 py-2.5 text-right font-medium">Critical lines</th>
                 <th className="px-3 py-2.5 text-right font-medium">Pending approvals</th>
                 <th className="px-3 py-2.5 text-right font-medium">Attendance</th>

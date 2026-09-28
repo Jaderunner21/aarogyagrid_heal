@@ -28,7 +28,11 @@ export function RecommendationCard({
   const qty = isTransfer ? item.qty : (item.qtyApproved ?? item.qtyRequested)
   const from = isTransfer ? item.fromName : item.warehouseName
   const to = isTransfer ? item.toName : item.facilityName
-  const priority = isTransfer ? item.priority : item.receiverDaysLeft !== null && item.receiverDaysLeft < 7 ? 1 : 2
+  const priority = isTransfer
+    ? item.priority
+    : /^urgent/i.test(item.aiReason ?? "") || (item.receiverDaysLeft !== null && item.receiverDaysLeft < 7)
+      ? 1
+      : 2
   const actions = isTransfer ? transferActions(item, viewer) : indentActions(item, viewer)
   const reason = item.aiReason ?? (item.kind === "indent" ? item.note : null)
   const receiverStatus = statusFor(item.receiverDaysLeft, 7)

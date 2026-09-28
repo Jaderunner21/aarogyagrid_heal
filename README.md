@@ -41,6 +41,14 @@ AarogyaGrid predicts how much of each medicine every health centre will use over
 |---|---|---|
 | ![District map with boundaries and transfers](docs/screenshots/district-map.jpg) | ![30-day forecast](docs/screenshots/forecast.jpg) | ![National overview](docs/screenshots/national-overview.jpg) |
 
+| Sub-centre (phone) | Scanning a pack | "We've run out" |
+|---|---|---|
+| ![Sub-centre home](docs/screenshots/subcentre-phone.jpg) | ![Scan receipt](docs/screenshots/scan-phone.jpg) | ![We've run out](docs/screenshots/stockout-phone.jpg) |
+
+| District hospital: beds by type | Sub-centre requests at the PHC | Catalogue by level of care |
+|---|---|---|
+| ![District hospital](docs/screenshots/district-hospital.jpg) | ![Sub-centre requests](docs/screenshots/subcentre-requests.jpg) | ![Catalogue by tier](docs/screenshots/tier-catalogue.jpg) |
+
 | Cross-district approval | Admin console: medicines | Asking for a new medicine |
 |---|---|---|
 | ![Cross-district approval](docs/screenshots/cross-district-approval.jpg) | ![Admin console](docs/screenshots/admin-medicines.jpg) | ![Medicine request](docs/screenshots/medicine-request-phone.jpg) |
@@ -120,8 +128,8 @@ Next.js 16 (App Router, React 19, TypeScript) · Tailwind CSS 4 · shadcn/ui + R
 Open the site and pick any account in the **Demo accounts** panel on the login page: one click, no password. Each role sees only its own area. A good tour:
 
 1. **Dungarpur · district** (Dr. Farida Khan): an outbreak warning, the facility map with district borders, and the action queue of suggested orders and transfers.
-2. **PHC · Doctor**, then choose **PHC Malpur**: the doctor's day at a glance and staff requests waiting for sign-off. Switch to **Staff** to see the phone view and voice entry.
-3. **Health facilities**, then choose **SHC Obri**: a sub-centre whose orders go to PHC Sagwara. Then try **District Hospital Dungarpur · Doctor** to see ICU and HDU beds by type.
+2. **PHC · Doctor**, then choose **PHC Malpur**: the doctor's day at a glance and staff requests waiting for sign-off. Switch to **Staff** to see the phone view, voice entry, **Scan receipt** (try the sample pack) and the **We've run out** button.
+3. **Health facilities**, then choose **SHC Obri**: a sub-centre whose orders go to PHC Sagwara; sign in as the **PHC Sagwara** doctor to approve them. Then try **District Hospital Dungarpur · Doctor** to see ICU and HDU beds by type.
 4. **Gujarat · state admin** (Dr. Kiran Desai): transfers between districts, and the Admin console with medicine requests from PHCs.
 5. **India · national admin** (Dr. Meera Iyer): both states on one map, state comparison and forecast accuracy.
 
@@ -130,6 +138,7 @@ Open the site and pick any account in the **Demo accounts** panel on the login p
 - **2 states, 5 districts, 36 PHCs, 12 sub-centres, 2 CHCs, 2 district hospitals, 5 district warehouses and 26 items** (medicines, oxygen, consumables, vaccines, diagnostic kits), about 14 months of daily history with realistic seasons.
 - Jan Aushadhi stores can be shown on the map for reference; they are not part of the government stock chain.
 - Facility names are real places in Udaipur, Rajsamand and Dungarpur (Rajasthan) and Aravalli and Sabarkantha (Gujarat). **All stock, patient and staff numbers are made up.** Sub-centre names, registry IDs (HFR, HPR), barcodes and LaQshya certifications are illustrative.
+- `db/demo/realistic_month.sql` sets the demo to an ordinary month: most shelves stocked, a few items low, a handful of real shortages.
 - `db/demo/simulate_outbreak.sql` creates a fever and diarrhoea surge at three PHCs in Dungarpur; press **Run analysis** as the Dungarpur district officer to see the outbreak alert.
 
 ### Demo accounts
@@ -150,13 +159,15 @@ Sign in with one click from the login page.
 ## Project structure
 
 ```
-src/app/            screens for each role, admin console, API routes
+src/app/            screens for each role, admin console, API routes (engine, AI, FHIR, nightly job)
 src/lib/engine/     forecasting, alerts, redistribution (with tests)
 src/lib/ai/         Gemini calls, prompts and response checks
-src/components/     maps, charts, tables, dialogs, PHC and doctor screens
+src/lib/gs1.ts      reading GS1 / EAN barcodes on medicine packs
+src/lib/fhir.ts     FHIR R4 resources
+src/components/     maps, charts, tables, dialogs, scanner, PHC and doctor screens
 db/base/            base schema and Rajasthan demo data
-db/migrations/      national level, surges, batches, admin console, doctors, medicine lists, facility levels and beds
-db/seed/, db/demo/  Gujarat, sub-centre and hospital demo data; outbreak simulation
+db/migrations/      database changes, applied in order (002–009)
+db/seed/, db/demo/  demo data for both states and every level of care; demo scenarios
 public/geo/         district and state boundaries (OpenStreetMap)
 scripts/            database setup and demo accounts
 ```
@@ -164,7 +175,7 @@ scripts/            database setup and demo accounts
 ## Tests
 
 ```bash
-npm test            # engine tests
+npm test            # engine, barcode and FHIR tests
 npm run lint
 npm run typecheck
 ```

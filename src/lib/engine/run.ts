@@ -502,7 +502,8 @@ export async function runEngine(
             daysLeft: p.fc.daysLeft,
             resupplyDays: f.resupply_days,
           },
-          thresholds,
+          // a warehouse normally holds months of stock for the whole district: overstock only past twice the limit
+          f.type === "warehouse" ? { ...thresholds, overstockDays: thresholds.overstockDays * 2 } : thresholds,
         ),
       )
     }
